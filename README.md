@@ -13,6 +13,31 @@ One screen for every sub-account in a HighLevel (GHL) agency:
 - Account drawer with daily leads vs threshold, showed/no-show appointments, revenue, and per-account overrides.
 - Light and dark themes, works on mobile, and has a **demo mode** with 100 simulated clients so you can try it without a GHL app.
 
+## Pages & sign-in
+
+| Route | What it is |
+|---|---|
+| `/` | Public home page |
+| `/docs` | Detailed user documentation |
+| `/privacy`, `/terms` | Privacy Policy and Terms of Service (set `LEGAL_ENTITY_NAME`, `SUPPORT_EMAIL` and `LEGAL_JURISDICTION`, and have them reviewed before launch) |
+| `/login` | Email and password sign-in |
+| `/setup` | Email and password creation, shown right after the first CRM connection |
+| `/dashboard`, `/settings` | The app (requires sign-in) |
+
+**Sign-in flow:**
+1. **Connect CRM** (OAuth).
+2. **First connection:** `/setup` asks for an email and password, then sends you to `/login`.
+3. **Later visits:** sign in with email and password.
+
+**Password storage and sessions:**
+- Passwords are hashed with scrypt.
+- Sessions are signed cookies that last 14 days. Changing a password signs out all other sessions.
+- Sign-in attempts are rate-limited.
+
+**Forgot password:** "Forgot password?" re-runs the CRM OAuth flow with `intent=reset`. Proving ownership of the CRM workspace lets you set a new password.
+
+All user-facing copy uses the neutral terms **CRM**, **workspace** and **account**. Environment variables accept `CRM_*` names, and the older `GHL_*` names still work.
+
 ## Quick start
 
 ```bash
@@ -103,7 +128,7 @@ Any long-running Node host works: Render, Fly.io, Railway or a VM. Health check:
 npm run build && npm test
 ```
 
-This runs 38 end-to-end checks against a mock HighLevel API (`scripts/mock-ghl.mjs`):
+This runs 64 end-to-end checks against a mock CRM API (`scripts/mock-ghl.mjs`):
 - OAuth state and code exchange, token-exchange count
 - Sync and metrics, including timezone bucketing
 - Encryption at rest
@@ -112,6 +137,7 @@ This runs 38 end-to-end checks against a mock HighLevel API (`scripts/mock-ghl.m
 - Snapshot push, failure and retry
 - Cron auth
 - Webhook signatures, idempotency and uninstall cleanup
+- Login setup, sign-in, password rules, password change and reset, rate limiting
 
 ## Architecture
 

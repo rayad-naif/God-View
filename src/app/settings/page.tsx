@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
-import { getSessionCompanyId } from "@/lib/session";
+import { getSession } from "@/lib/session";
 import SettingsView from "@/components/SettingsView";
 
-export default function SettingsPage() {
-  if (!getSessionCompanyId()) redirect("/");
+export const dynamic = "force-dynamic";
+
+export default async function Page() {
+  if (!(await getSession())) redirect("/login");
   return <SettingsView />;
 }

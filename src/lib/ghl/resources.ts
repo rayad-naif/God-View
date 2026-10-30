@@ -1,5 +1,6 @@
 import type { CompanyStore, Snapshot } from "../types";
 import { ghlFetch, getAgencyToken, getLocationToken } from "./client";
+import { crmEnv } from "@/lib/env";
 
 export type GhlLocation = { id: string; name: string; city?: string; state?: string; timezone?: string };
 
@@ -18,7 +19,7 @@ export async function listLocations(store: CompanyStore): Promise<GhlLocation[]>
   }
 
   // Location tokens can only be minted for sub-accounts where the app is installed.
-  const appId = process.env.GHL_APP_ID;
+  const appId = crmEnv("APP_ID");
   if (appId) {
     try {
       const data = await ghlFetch<any>("/oauth/installedLocations", token, {

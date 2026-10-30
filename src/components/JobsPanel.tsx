@@ -11,7 +11,7 @@ const ICON: Record<PushTargetStatus, React.ReactNode> = {
   completed: <CheckCircle2 className="w-4 h-4 text-good" />,
   failed: <XCircle className="w-4 h-4 text-critical" />,
 };
-const LABEL: Record<PushTargetStatus, string> = { queued: "Queued", pushing: "Sending", processing: "Loading in GHL", completed: "Done", failed: "Failed" };
+const LABEL: Record<PushTargetStatus, string> = { queued: "Queued", pushing: "Sending", processing: "Loading in CRM", completed: "Done", failed: "Failed" };
 
 export function jobActive(j: PushJob) {
   return j.targets.some((t) => t.status !== "completed" && t.status !== "failed");

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { crmEnv } from "@/lib/env";
 
 const pem = (k: string) => k.replace(/\\n/g, "\n").trim();
 
@@ -9,10 +10,10 @@ const pem = (k: string) => k.replace(/\\n/g, "\n").trim();
  * Both public keys are published in HighLevel's webhook docs; paste them into env as PEM.
  */
 export function verifyGhlWebhook(rawBody: string, headers: Headers): { ok: boolean; reason?: string } {
-  const edKey = process.env.GHL_WEBHOOK_ED25519_PUBLIC_KEY;
-  const rsaKey = process.env.GHL_WEBHOOK_PUBLIC_KEY;
+  const edKey = crmEnv("WEBHOOK_ED25519_PUBLIC_KEY");
+  const rsaKey = crmEnv("WEBHOOK_PUBLIC_KEY");
   if (!edKey && !rsaKey) {
-    if (process.env.NODE_ENV === "production" && process.env.GHL_WEBHOOK_ALLOW_UNSIGNED !== "true") {
+    if (process.env.NODE_ENV === "production" && crmEnv("WEBHOOK_ALLOW_UNSIGNED") !== "true") {
       return { ok: false, reason: "No webhook public key configured" };
     }
     return { ok: true, reason: "unverified (no key configured, non-production)" };

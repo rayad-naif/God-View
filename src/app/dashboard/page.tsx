@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
-import { getSessionCompanyId } from "@/lib/session";
+import { getSession } from "@/lib/session";
 import Dashboard from "@/components/Dashboard";
 
-export default function DashboardPage() {
-  if (!getSessionCompanyId()) redirect("/");
+export const dynamic = "force-dynamic";
+
+export default async function Page() {
+  if (!(await getSession())) redirect("/login");
   return <Dashboard />;
 }

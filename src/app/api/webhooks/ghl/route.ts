@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { verifyGhlWebhook } from "@/lib/ghl/webhook";
 import { deleteStore, loadStore, saveStore } from "@/lib/store";
 import { startSync, syncSingleLocation } from "@/lib/sync";
+import { deleteUsersForCompany } from "@/lib/users";
+import { crmEnv } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +19,7 @@ export async function POST(req: Request) {
   let evt: any;
   try { evt = JSON.parse(raw); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
 
-  const appId = process.env.GHL_APP_ID;
+  const appId = crmEnv("APP_ID");
   if (appId && evt.appId && !String(evt.appId).startsWith(appId)) return NextResponse.json({ ignored: "other app" });
 
   const companyId: string | undefined = evt.companyId;
@@ -39,13 +41,14 @@ export async function POST(req: Request) {
     if (!locationId) {
       // Agency-level uninstall: revoke everything and delete the agency's data.
       await deleteStore(companyId);
-      return NextResponse.json({ ok: true, action: "agency data deleted" });
+      await deleteUsersForCompany(companyId);
+      return NextResponse.json({ ok: true, action: "workspace data deleted" });
     }
     delete store.accounts[locationId];
     delete store.locationTokens[locationId];
     store.alertedChurn = store.alertedChurn?.filter((id) => id !== locationId);
     await saveStore(store);
-    return NextResponse.json({ ok: true, action: "sub-account removed" });
+    return NextResponse.json({ ok: true, action: "account removed" });
   }
 
   if (type === "INSTALL" || type === "LOCATIONCREATE") {
@@ -53,7 +56,7 @@ export async function POST(req: Request) {
     await saveStore(store);
     if (id) {
       void syncSingleLocation(store, id).catch((e) => console.error("[webhook] sync", e));
-      return NextResponse.json({ ok: true, action: "syncing sub-account" });
+      return NextResponse.json({ ok: true, action: "syncing account" });
     }
     void startSync(store);
     return NextResponse.json({ ok: true, action: "full sync" });

@@ -2,13 +2,14 @@ import { promises as fs } from "fs";
 import path from "path";
 import type { CompanyStore, Settings } from "./types";
 import { decrypt, encrypt } from "./crypto";
+import { crmEnv } from "@/lib/env";
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 
 export const DEFAULT_SETTINGS: Settings = {
   churnThreshold: 3,
   churnDays: 3,
-  adSpendCustomValueKey: process.env.GHL_AD_SPEND_CUSTOM_VALUE || "ad_spend_daily",
+  adSpendCustomValueKey: crmEnv("AD_SPEND_CUSTOM_VALUE") || "ad_spend_daily",
   syncWindowDays: 60,
 };
 

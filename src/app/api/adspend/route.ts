@@ -5,7 +5,7 @@ import { normaliseDate, parseCsv } from "@/lib/csv";
 
 export const dynamic = "force-dynamic";
 
-const ACCOUNT_COLS = ["location_id", "locationid", "sub_account_id", "account_id", "id", "sub_account", "account", "location", "name", "client"];
+const ACCOUNT_COLS = ["account_id", "location_id", "locationid", "sub_account_id", "account_id", "id", "sub_account", "account", "location", "name", "client"];
 const DATE_COLS = ["date", "day"];
 const SPEND_COLS = ["spend", "amount", "cost", "ad_spend", "amount_spent"];
 
@@ -15,7 +15,7 @@ export async function GET() {
   if (!store) return unauthorized();
   const d = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
   const esc = (s: string) => `"${s.replace(/"/g, '""')}"`;
-  const lines = ["location_id,name,date,spend", ...Object.values(store.accounts).map((a) => `${a.id},${esc(a.name)},${d},`)];
+  const lines = ["account_id,name,date,spend", ...Object.values(store.accounts).map((a) => `${a.id},${esc(a.name)},${d},`)];
   return new NextResponse(lines.join("\n"), {
     headers: { "Content-Type": "text/csv", "Content-Disposition": 'attachment; filename="ad-spend-template.csv"' },
   });
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
   const idCols = ACCOUNT_COLS.map((n) => header.indexOf(n)).filter((i) => i >= 0);
   const dCol = col(DATE_COLS), sCol = col(SPEND_COLS);
   if (!idCols.length || dCol < 0 || sCol < 0) {
-    return NextResponse.json({ error: "CSV needs an account column (location_id or name), a date column and a spend column" }, { status: 400 });
+    return NextResponse.json({ error: "CSV needs an account column (account_id or name), a date column and a spend column" }, { status: 400 });
   }
 
   const byName = new Map(Object.values(store.accounts).map((a) => [a.name.trim().toLowerCase(), a]));

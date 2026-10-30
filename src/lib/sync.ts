@@ -24,7 +24,7 @@ export function startSync(store: CompanyStore): Promise<void> {
 }
 
 async function syncDemo(store: CompanyStore) {
-  store.sync = { running: true, startedAt: new Date().toISOString(), total: 100, done: 0, errors: 0, message: "Pulling sub-accounts…" };
+  store.sync = { running: true, startedAt: new Date().toISOString(), total: 100, done: 0, errors: 0, message: "Pulling accounts…" };
   const fresh = buildDemoStore();
   for (let i = 0; i < 100; i += 10) {
     await new Promise((r) => setTimeout(r, 120));
@@ -40,7 +40,7 @@ async function syncDemo(store: CompanyStore) {
 }
 
 async function syncLive(store: CompanyStore) {
-  store.sync = { running: true, startedAt: new Date().toISOString(), total: 0, done: 0, errors: 0, message: "Listing sub-accounts…" };
+  store.sync = { running: true, startedAt: new Date().toISOString(), total: 0, done: 0, errors: 0, message: "Listing accounts…" };
   try {
     if (!store.companyName) store.companyName = await getCompanyName(store);
     const locations = await listLocations(store);
@@ -59,7 +59,7 @@ async function syncLive(store: CompanyStore) {
       store.sync.done++;
       if (++sinceSave >= 10) { sinceSave = 0; await saveStore(store); }
     });
-    store.sync.message = store.sync.errors ? `${store.sync.errors} sub-account(s) failed to sync` : undefined;
+    store.sync.message = store.sync.errors ? `${store.sync.errors} account${store.sync.errors === 1 ? "" : "s"} failed to sync` : undefined;
   } catch (e: any) {
     store.sync.message = String(e?.message ?? e).slice(0, 300);
     store.sync.errors++;
@@ -127,7 +127,7 @@ async function syncLocation(store: CompanyStore, loc: GhlLocation, from: Date, t
     account.syncError = undefined;
   } catch (e: any) {
     account.syncError = e?.status === 401 || e?.status === 403
-      ? "No access – is the app installed on this sub-account?"
+      ? "No access. Is God View installed on this account in your CRM?"
       : String(e?.message ?? e).slice(0, 240);
     ok = false;
   }

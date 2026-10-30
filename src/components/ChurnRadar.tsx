@@ -22,7 +22,7 @@ export default function ChurnRadar({ accounts, churnDays, onOpen }: { accounts: 
     .sort((a, b) => b.lowStreak - a.lowStreak || a.leads - b.leads);
 
   if (!flagged.length)
-    return <div className="px-4 py-8 text-sm text-ink-3 text-center">No sub-accounts are below their lead threshold. 🎉</div>;
+    return <div className="px-4 py-8 text-sm text-ink-3 text-center">No accounts are below their lead threshold. 🎉</div>;
 
   // Completed days only (drop today), last 14.
   const days = flagged[0].series.slice(0, -1).slice(-14).map((s) => s.date);
@@ -33,7 +33,7 @@ export default function ChurnRadar({ accounts, churnDays, onOpen }: { accounts: 
         <table className="text-xs border-separate" style={{ borderSpacing: 2 }}>
           <thead>
             <tr>
-              <th className="text-left font-medium text-ink-2 pr-3 min-w-[200px]">Sub-account</th>
+              <th className="text-left font-medium text-ink-2 pr-3 min-w-[200px]">Account</th>
               {days.map((d, i) => (
                 <th key={d} className="font-normal text-ink-3 w-7 tnum">{i % 2 === days.length % 2 ? "" : shortDate(d).split(" ")[1]}</th>
               ))}

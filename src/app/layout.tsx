@@ -2,8 +2,8 @@ import "./globals.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "God View – Agency Analytics Hub",
-  description: "Every HighLevel sub-account on one screen: leaderboard, churn predictor and one-click snapshot push.",
+  title: "God View: every CRM account on one screen",
+  description: "Every account in your CRM on one screen: leaderboard, churn predictor and one-click snapshot push.",
 };
 
 // Apply the saved theme before paint to avoid a flash.

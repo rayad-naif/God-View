@@ -25,7 +25,7 @@ type Archetype = "star" | "steady" | "churning" | "dipping" | "volatile" | "reco
 
 export function buildDemoStore(): CompanyStore {
   const store = emptyStore("demo", "demo");
-  store.companyName = "Northwind Growth Agency (demo)";
+  store.companyName = "Northwind Growth (demo)";
   const days = lastDays(60);
   const r = rng(42);
   const pick = <T,>(a: readonly T[]) => a[Math.floor(r() * a.length)];
@@ -93,7 +93,7 @@ export function advanceDemoJob(job: PushJob) {
     if (elapsed > offset + 7000) {
       const fail = (t.locationId.charCodeAt(t.locationId.length - 1) + job.snapshotId.length) % 17 === 0;
       t.status = fail ? "failed" : "completed";
-      if (fail) t.message = "Sub-account has a conflicting custom field. Retry with override enabled.";
+      if (fail) t.message = "Account has a conflicting custom field. Retry with override enabled.";
     } else if (elapsed > offset + 2500) t.status = "processing";
     else if (elapsed > offset) t.status = "pushing";
     if (prev !== t.status) t.updatedAt = new Date().toISOString();
