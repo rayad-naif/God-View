@@ -148,7 +148,7 @@ export default function AccountDrawer({ account: a, rank, total, metric, onClose
           </section>
 
           <section className="card p-4">
-            <div className="text-sm font-semibold">Overrides for this sub-account</div>
+            <div className="text-sm font-semibold">Overrides for this account</div>
             <div className="mt-3 grid sm:grid-cols-2 gap-3">
               <label className="text-xs text-ink-2">
                 Daily ad spend ($)
@@ -156,7 +156,7 @@ export default function AccountDrawer({ account: a, rank, total, metric, onClose
               </label>
               <label className="text-xs text-ink-2">
                 Churn threshold (leads/day)
-                <input className="input w-full mt-1" inputMode="numeric" placeholder="Use agency default" value={thr} onChange={(e) => setThr(e.target.value.replace(/\D/g, ""))} />
+                <input className="input w-full mt-1" inputMode="numeric" placeholder="Use workspace default" value={thr} onChange={(e) => setThr(e.target.value.replace(/\D/g, ""))} />
               </label>
             </div>
             <button className="btn mt-3" onClick={save} disabled={saving}><Save className="w-4 h-4" /> {saving ? "Saving…" : "Save overrides"}</button>

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { encodeSession, sessionCookie } from "@/lib/session";
+import { demoSessionToken, sessionCookie } from "@/lib/session";
 
 export async function GET(req: Request) {
   const res = NextResponse.redirect(new URL("/dashboard", req.url));
-  res.cookies.set(sessionCookie.name, encodeSession("demo"), sessionCookie.options);
+  res.cookies.set(sessionCookie.name, demoSessionToken(), sessionCookie.options);
   return res;
 }

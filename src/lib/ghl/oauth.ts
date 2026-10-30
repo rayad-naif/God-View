@@ -1,4 +1,5 @@
 import { ghlFetch } from "./client";
+import { crmEnv } from "@/lib/env";
 
 export const GHL_SCOPES = [
   "locations.readonly",
@@ -15,14 +16,14 @@ export const GHL_SCOPES = [
 ];
 
 export function ghlConfigured() {
-  return Boolean(process.env.GHL_CLIENT_ID && process.env.GHL_CLIENT_SECRET && process.env.GHL_REDIRECT_URI);
+  return Boolean(crmEnv("CLIENT_ID") && crmEnv("CLIENT_SECRET") && crmEnv("REDIRECT_URI"));
 }
 
 export function authorizeUrl(state: string) {
   const u = new URL("https://marketplace.gohighlevel.com/oauth/chooselocation");
   u.searchParams.set("response_type", "code");
-  u.searchParams.set("redirect_uri", process.env.GHL_REDIRECT_URI!);
-  u.searchParams.set("client_id", process.env.GHL_CLIENT_ID!);
+  u.searchParams.set("redirect_uri", crmEnv("REDIRECT_URI")!);
+  u.searchParams.set("client_id", crmEnv("CLIENT_ID")!);
   u.searchParams.set("scope", GHL_SCOPES.join(" "));
   u.searchParams.set("state", state);
   return u.toString();
@@ -42,12 +43,12 @@ export type TokenResponse = {
 export function exchangeCode(code: string) {
   return ghlFetch<TokenResponse>("/oauth/token", null, {
     form: {
-      client_id: process.env.GHL_CLIENT_ID!,
-      client_secret: process.env.GHL_CLIENT_SECRET!,
+      client_id: crmEnv("CLIENT_ID")!,
+      client_secret: crmEnv("CLIENT_SECRET")!,
       grant_type: "authorization_code",
       code,
       user_type: "Company",
-      redirect_uri: process.env.GHL_REDIRECT_URI!,
+      redirect_uri: crmEnv("REDIRECT_URI")!,
     },
   });
 }

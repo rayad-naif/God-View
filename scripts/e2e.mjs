@@ -28,7 +28,7 @@ const app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start",
     GHL_CLIENT_ID: "app123-client",
     GHL_CLIENT_SECRET: "secret",
     GHL_REDIRECT_URI: `${BASE}/api/auth/callback`,
-    GHL_APP_ID: "app123",
+    CRM_APP_ID: "app123",
     SESSION_SECRET: "test-session-secret-0123456789abcdef",
     GHL_WEBHOOK_ED25519_PUBLIC_KEY: publicKey.export({ type: "spki", format: "pem" }),
     CRON_SECRET,
@@ -53,7 +53,7 @@ const post = (p, body) => req(p, { method: "POST", headers: { "content-type": "a
 const waitSync = async () => { for (let i = 0; i < 50; i++) { const s = await req("/api/sync"); if (!s.json?.running) return s.json; await sleep(200); } };
 const signedWebhook = (evt) => {
   const raw = JSON.stringify(evt);
-  return req("/api/webhooks/ghl", { method: "POST", headers: { "content-type": "application/json", "x-ghl-signature": crypto.sign(null, Buffer.from(raw), privateKey).toString("base64") }, body: raw });
+  return req("/api/webhooks/crm", { method: "POST", headers: { "content-type": "application/json", "x-ghl-signature": crypto.sign(null, Buffer.from(raw), privateKey).toString("base64") }, body: raw });
 };
 
 try {
@@ -62,9 +62,11 @@ try {
   console.log("Health & OAuth");
   const health = await req("/api/health");
   check("health reports OAuth + webhook verification configured", health.json?.oauthConfigured && health.json?.webhookVerification);
-  const login = await req("/api/auth/login");
+  const legacy = await req("/api/auth/login");
+  check("old connect link forwards to /api/auth/connect", legacy.headers.get("location")?.endsWith("/api/auth/connect"));
+  const login = await req("/api/auth/connect");
   const authUrl = new URL(login.headers.get("location"));
-  check("login redirects to HighLevel chooselocation", authUrl.host === "marketplace.gohighlevel.com" && authUrl.pathname === "/oauth/chooselocation");
+  check("connect redirects to the CRM consent screen", authUrl.host === "marketplace.gohighlevel.com" && authUrl.pathname === "/oauth/chooselocation");
   check("requests all 11 scopes", authUrl.searchParams.get("scope").split(" ").length === 11);
   const state = authUrl.searchParams.get("state");
   const stateCookie = login.headers.get("set-cookie").match(/gv_oauth_state=([^;]+)/)[1];
@@ -72,15 +74,38 @@ try {
   const bad = await req(`/api/auth/callback?code=abc&state=wrong`);
   check("callback rejects mismatched state", bad.headers.get("location")?.includes("error="));
   const cb = await req(`/api/auth/callback?code=abc&state=${state}`);
-  check("callback redirects to dashboard", cb.headers.get("location")?.endsWith("/dashboard"));
-  cookie = `gv_session=${cb.headers.get("set-cookie").match(/gv_session=([^;]+)/)[1]}`;
+  check("first connection goes to login setup", cb.headers.get("location")?.endsWith("/setup"), cb.headers.get("location"));
+  const setupCookie = cb.headers.get("set-cookie").match(/gv_setup=([^;]+)/)[1];
+  check("no session is issued before setup", !/gv_session=[^;]/.test(cb.headers.get("set-cookie")));
 
+  console.log("Login setup & sign-in");
+  cookie = "";
+  check("setup requires the post-connection ticket", (await post("/api/auth/setup", { email: "owner@acme.test", password: "correct horse battery" })).status === 401);
+  cookie = `gv_setup=${setupCookie}`;
+  check("setup page renders the form", (await req("/setup")).text.includes("Create your login"));
+  check("rejects a short password", (await post("/api/auth/setup", { email: "owner@acme.test", password: "short" })).json?.field === "password");
+  check("rejects a bad email", (await post("/api/auth/setup", { email: "nope", password: "correct horse battery" })).json?.field === "email");
+  check("rejects mismatched confirmation", (await post("/api/auth/setup", { email: "owner@acme.test", password: "correct horse battery", confirm: "x" })).json?.field === "confirm");
+  const setup = await post("/api/auth/setup", { email: "Owner@Acme.test", password: "correct horse battery", confirm: "correct horse battery" });
+  check("setup creates the login and sends you to sign in", setup.status === 200 && setup.json.next.startsWith("/login?notice=created&email=owner%40acme.test"), setup.text);
+  check("setup ticket is consumed", /gv_setup=;/.test(setup.headers.get("set-cookie") ?? ""));
+  const users = JSON.parse(fs.readFileSync(path.join(dataDir, "users.json"), "utf8")).users;
+  check("password stored only as scrypt hash", users[0].passwordHash.startsWith("scrypt$") && !JSON.stringify(users).includes("correct horse"));
+  cookie = "";
+  check("dashboard requires sign-in", (await req("/dashboard")).headers.get("location")?.includes("/login"));
+  check("wrong password rejected", (await post("/api/auth/login", { email: "owner@acme.test", password: "wrong password!" })).status === 401);
+  check("unknown email gives the same error", (await post("/api/auth/login", { email: "nobody@acme.test", password: "wrong password!" })).json?.error === "Email or password is incorrect.");
+  const signIn = await post("/api/auth/login", { email: "OWNER@acme.test", password: "correct horse battery" });
+  check("sign in with email + password", signIn.status === 200);
+  cookie = `gv_session=${signIn.headers.get("set-cookie").match(/gv_session=([^;]+)/)[1]}`;
+  check("signed-in user can open the dashboard", (await req("/dashboard")).status === 200);
+  check("/api/auth/me returns the email", (await req("/api/auth/me")).json?.email === "owner@acme.test");
   console.log("Sync & metrics");
   const sync = await waitSync();
   check("sync finished with 1 failed sub-account (not installed)", sync?.done === 3 && sync?.errors === 1, JSON.stringify(sync));
   const dash = (await req("/api/dashboard?days=7")).json;
   const by = Object.fromEntries(dash.accounts.map((a) => [a.id, a]));
-  check("company name pulled", dash.companyName === "Acme Agency");
+  check("company name pulled", dash.companyName === "Acme Marketing");
   check("Alpha healthy, 70 leads in 7d, CPL $5", by.L1.status === "healthy" && by.L1.leads === 70 && by.L1.cpl === 5, JSON.stringify(by.L1).slice(0, 200));
   check("Beta flagged churn (1 lead/day < 3)", by.L2.status === "churn");
   check("Gamma shows install error", by.L3.status === "error" && /installed/.test(by.L3.syncError));
@@ -112,7 +137,7 @@ try {
   check("import counts rows / unmatched / invalid", imp.imported === 1 && imp.unmatched[0] === "Unknown Co" && imp.invalid === 1, JSON.stringify(imp));
   const alpha = (await req("/api/dashboard?days=7")).json.accounts.find((a) => a.id === "L1");
   check("imported day overrides synced spend", alpha.spend === 6 * 50 + 1000, `spend=${alpha.spend}`);
-  check("template CSV lists sub-accounts", (await req("/api/adspend")).text.includes("Beta Dental"));
+  check("template CSV uses account_id and lists accounts", (await req("/api/adspend")).text.startsWith("account_id,name,date,spend") && (await req("/api/adspend")).text.includes("Beta Dental"));
 
   console.log("Snapshot push & retry");
   const snaps = (await req("/api/snapshots")).json.snapshots;
@@ -133,19 +158,47 @@ try {
   const cron = await req("/api/cron/sync", { headers: { authorization: `Bearer ${CRON_SECRET}` } });
   check("cron syncs connected agencies", cron.json?.synced?.includes("co1"), cron.text);
 
+  console.log("Password change, reconnect & reset");
+  const oldCookie = cookie;
+  check("password change needs the current password", (await post("/api/auth/password", { current: "nope", password: "another long passphrase" })).status === 401);
+  const ch = await post("/api/auth/password", { current: "correct horse battery", password: "another long passphrase" });
+  check("password changed", ch.status === 200);
+  const newCookie = `gv_session=${ch.headers.get("set-cookie").match(/gv_session=([^;]+)/)[1]}`;
+  cookie = oldCookie;
+  check("old sessions are signed out", (await req("/api/dashboard")).status === 401);
+  cookie = newCookie;
+  check("current session keeps working", (await req("/api/dashboard")).status === 200);
+  const reconnect = await req(`/api/auth/callback?code=abc`);
+  check("reconnecting while signed in returns to settings", reconnect.headers.get("location")?.endsWith("/settings?notice=reconnected"), reconnect.headers.get("location"));
+  cookie = "gv_oauth_intent=reset";
+  const reset = await req(`/api/auth/callback?code=abc`);
+  check("forgot password → CRM re-auth → setup in reset mode", reset.headers.get("location")?.endsWith("/setup"));
+  cookie = `gv_setup=${reset.headers.get("set-cookie").match(/gv_setup=([^;]+)/)[1]}`;
+  check("reset page says reset", (await req("/setup")).text.includes("Reset your password"));
+  const r2 = await post("/api/auth/setup", { email: "owner@acme.test", password: "reset passphrase 2026" });
+  check("reset keeps the same login", r2.json?.next?.startsWith("/login?notice=reset") && JSON.parse(fs.readFileSync(path.join(dataDir, "users.json"), "utf8")).users.length === 1);
+  cookie = newCookie;
+  check("reset signs out existing sessions", (await req("/api/dashboard")).status === 401);
+  const relog = await post("/api/auth/login", { email: "owner@acme.test", password: "reset passphrase 2026" });
+  cookie = `gv_session=${relog.headers.get("set-cookie").match(/gv_session=([^;]+)/)[1]}`;
+
   console.log("Webhooks");
   check("unsigned webhook rejected", (await req("/api/webhooks/ghl", { method: "POST", body: JSON.stringify({ type: "UNINSTALL", companyId: "co1" }) })).status === 401);
   const forged = JSON.stringify({ type: "UNINSTALL", companyId: "co1" });
   check("bad signature rejected", (await req("/api/webhooks/ghl", { method: "POST", headers: { "x-ghl-signature": Buffer.from("nope").toString("base64") }, body: forged })).status === 401);
   const created = await signedWebhook({ type: "LocationCreate", id: "L4", companyId: "co1", webhookId: "w1", appId: "app123" });
-  check("LocationCreate accepted", created.json?.action === "syncing sub-account", created.text);
+  check("LocationCreate accepted", created.json?.action === "syncing account", created.text);
   await sleep(800);
   check("new sub-account synced", (await req("/api/dashboard?days=7")).json.accounts.some((a) => a.id === "L4" && a.leads > 0));
   check("duplicate delivery ignored", (await signedWebhook({ type: "LocationCreate", id: "L4", companyId: "co1", webhookId: "w1" })).json?.duplicate === true);
   await signedWebhook({ type: "UNINSTALL", companyId: "co1", locationId: "L4", webhookId: "w2" });
   check("location uninstall removes sub-account", !(await req("/api/dashboard?days=7")).json.accounts.some((a) => a.id === "L4"));
+  cookie = "";
+  for (let i = 0; i < 8; i++) await post("/api/auth/login", { email: "owner@acme.test", password: "bad guess " + i });
+  check("sign-in is rate-limited after repeated failures", (await post("/api/auth/login", { email: "owner@acme.test", password: "reset passphrase 2026" })).status === 429);
+  cookie = `gv_session=${relog.headers.get("set-cookie").match(/gv_session=([^;]+)/)[1]}`;
   const un = await signedWebhook({ type: "UNINSTALL", companyId: "co1", webhookId: "w3" });
-  check("agency uninstall deletes data", un.json?.action === "agency data deleted" && !fs.existsSync(path.join(dataDir, "company-co1.json")));
+  check("workspace uninstall deletes data and login", un.json?.action === "workspace data deleted" && !fs.existsSync(path.join(dataDir, "company-co1.json")) && JSON.parse(fs.readFileSync(path.join(dataDir, "users.json"), "utf8")).users.length === 0);
   check("session no longer valid after uninstall", (await req("/api/dashboard")).status === 401);
 } catch (e) {
   failures++;

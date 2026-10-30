@@ -1,7 +1,8 @@
 import type { CompanyStore } from "../types";
 import { saveStore } from "../store";
+import { crmEnv } from "@/lib/env";
 
-export const GHL_API = process.env.GHL_API_BASE || "https://services.leadconnectorhq.com";
+export const GHL_API = crmEnv("API_BASE") || "https://services.leadconnectorhq.com";
 export const GHL_VERSION = "2021-07-28";
 
 export class GhlError extends Error {
@@ -48,7 +49,7 @@ export async function ghlFetch<T = any>(path: string, token: string | null, opts
     try { data = text ? JSON.parse(text) : {}; } catch { /* keep text */ }
     if (!res.ok) {
       const msg = (typeof data === "object" && (data.message || data.error_description || data.error)) || res.statusText;
-      throw new GhlError(res.status, `GHL ${res.status} ${path}: ${Array.isArray(msg) ? msg.join(", ") : msg}`, data);
+      throw new GhlError(res.status, `CRM request failed (${res.status}): ${Array.isArray(msg) ? msg.join(", ") : msg}`, data);
     }
     return data as T;
   }
@@ -61,7 +62,7 @@ const refreshing = new Map<string, Promise<string>>();
 /** Returns a valid agency (Company) access token, refreshing and persisting it if needed. */
 export async function getAgencyToken(store: CompanyStore): Promise<string> {
   const auth = store.auth;
-  if (!auth) throw new GhlError(401, "Not connected to HighLevel");
+  if (!auth) throw new GhlError(401, "CRM is not connected");
   if (auth.expiresAt - 120_000 > Date.now()) return auth.accessToken;
 
   // Refresh tokens are single-use: make sure concurrent callers share one refresh.
@@ -70,8 +71,8 @@ export async function getAgencyToken(store: CompanyStore): Promise<string> {
     p = (async () => {
       const data = await ghlFetch<any>("/oauth/token", null, {
         form: {
-          client_id: process.env.GHL_CLIENT_ID!,
-          client_secret: process.env.GHL_CLIENT_SECRET!,
+          client_id: crmEnv("CLIENT_ID")!,
+          client_secret: crmEnv("CLIENT_SECRET")!,
           grant_type: "refresh_token",
           refresh_token: auth.refreshToken,
           user_type: "Company",

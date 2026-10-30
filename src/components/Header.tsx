@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Eye, Moon, Sun, Settings, LogOut, RefreshCw, Rocket, LayoutDashboard } from "lucide-react";
+import { Eye, Moon, Sun, Settings, LogOut, RefreshCw, Rocket, LayoutDashboard, BookOpen } from "lucide-react";
 import type { SyncState } from "@/lib/types";
 import { relTime } from "@/lib/format";
 
@@ -35,6 +35,10 @@ type Props = {
 };
 
 export default function Header({ companyName, mode, sync, onSync, activeJobs = 0, onJobs, page }: Props) {
+  const [email, setEmail] = useState<string>();
+  useEffect(() => {
+    fetch("/api/auth/me").then((r) => r.json()).then((j) => setEmail(j.email)).catch(() => {});
+  }, []);
   return (
     <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--plane)]/90 backdrop-blur">
       <div className="max-w-[1500px] mx-auto px-4 h-14 flex items-center gap-3">
@@ -63,9 +67,11 @@ export default function Header({ companyName, mode, sync, onSync, activeJobs = 0
         ) : (
           <Link href="/dashboard" className="btn !p-2" aria-label="Dashboard"><LayoutDashboard className="w-4 h-4" /></Link>
         )}
+        <Link href="/docs" className="btn !p-2" aria-label="Documentation" title="Documentation"><BookOpen className="w-4 h-4" /></Link>
         <ThemeToggle />
+        {email && <span className="hidden xl:inline text-xs text-ink-3 max-w-[180px] truncate" title={email}>{email}</span>}
         <form action="/api/auth/logout" method="post">
-          <button className="btn !p-2" aria-label="Sign out"><LogOut className="w-4 h-4" /></button>
+          <button className="btn !p-2" aria-label={mode === "demo" ? "Exit demo" : "Sign out"} title={mode === "demo" ? "Exit demo" : "Sign out"}><LogOut className="w-4 h-4" /></button>
         </form>
       </div>
     </header>

@@ -4,7 +4,7 @@ import { Search, Rocket, X, Trophy, Siren, Download } from "lucide-react";
 import type { DashboardPayload, PushJob } from "@/lib/types";
 import { METRICS, MetricKey, bottomQuartile, rankBy } from "@/lib/format";
 import Header from "./Header";
-import { KpiTiles, AgencyTrend } from "./Overview";
+import { KpiTiles, AccountsTrend } from "./Overview";
 import Leaderboard from "./Leaderboard";
 import ChurnRadar from "./ChurnRadar";
 import AccountDrawer from "./AccountDrawer";
@@ -43,7 +43,7 @@ export default function Dashboard() {
 
   const load = useCallback(async () => {
     const r = await fetch(`/api/dashboard?days=${days}`, { cache: "no-store" });
-    if (r.status === 401) return void (window.location.href = "/");
+    if (r.status === 401) return void (window.location.href = "/login");
     if (!r.ok) return setError("Failed to load dashboard");
     setData(await r.json());
     setError(undefined);
@@ -127,7 +127,7 @@ export default function Dashboard() {
         {!data && !error && <Skeleton />}
         {data && data.accounts.length === 0 && (
           <div className="card p-10 text-center">
-            <div className="text-lg font-semibold">{data.sync.running ? "Pulling your sub-accounts from HighLevel…" : "No sub-accounts yet"}</div>
+            <div className="text-lg font-semibold">{data.sync.running ? "Pulling your accounts from your CRM…" : "No accounts yet"}</div>
             <div className="text-sm text-ink-2 mt-1">{data.sync.running ? `${data.sync.done}/${data.sync.total || "?"} synced` : data.sync.message ?? "Run a sync to load pipeline, appointment and lead data."}</div>
             {!data.sync.running && <button className="btn btn-primary mt-4" onClick={startSync}>Sync now</button>}
           </div>
@@ -150,12 +150,12 @@ export default function Dashboard() {
               </div>
               <div className="relative flex-1 min-w-[180px] max-w-xs">
                 <Search className="w-4 h-4 absolute left-2.5 top-2.5 text-ink-3" />
-                <input className="input w-full !pl-8" placeholder="Search sub-accounts…" value={q} onChange={(e) => setQ(e.target.value)} />
+                <input className="input w-full !pl-8" placeholder="Search accounts…" value={q} onChange={(e) => setQ(e.target.value)} />
               </div>
             </div>
 
             <KpiTiles data={data} onChurnClick={() => { setStatus("churn"); document.getElementById("leaderboard")?.scrollIntoView({ behavior: "smooth" }); }} />
-            <AgencyTrend data={data} />
+            <AccountsTrend data={data} />
 
             <section id="leaderboard" className="card overflow-hidden">
               <div className="px-4 pt-4 pb-3 flex flex-wrap items-center gap-3 border-b border-[var(--border)]">
@@ -206,7 +206,7 @@ export default function Dashboard() {
                 <div>
                   <h2 className="font-semibold">Churn predictor</h2>
                   <div className="text-xs text-ink-3">
-                    Sub-accounts under their lead threshold (default {data.settings.churnThreshold}/day) on recent completed days. {data.settings.churnDays}+ consecutive days = red.
+                    Accounts under their lead threshold (default {data.settings.churnThreshold}/day) on recent completed days. {data.settings.churnDays}+ consecutive days = red.
                   </div>
                 </div>
               </div>
@@ -237,7 +237,7 @@ export default function Dashboard() {
           initialTargets={push.targets}
           mode={data.mode}
           onClose={() => setPush(null)}
-          onPushed={(n) => { setPush(null); setDrawerId(undefined); setSelected(new Set()); setToast(`Snapshot push started for ${n} sub-account${n === 1 ? "" : "s"}`); void loadJobs(); setJobsOpen(true); }}
+          onPushed={(n) => { setPush(null); setDrawerId(undefined); setSelected(new Set()); setToast(`Snapshot push started for ${n} account${n === 1 ? "" : "s"}`); void loadJobs(); setJobsOpen(true); }}
         />
       )}
       {jobsOpen && (
@@ -246,7 +246,7 @@ export default function Dashboard() {
           onClose={() => setJobsOpen(false)}
           onRetry={async (id) => {
             const r = await fetch(`/api/snapshots/jobs/${id}/retry`, { method: "POST" });
-            setToast(r.ok ? "Retrying failed sub-accounts" : (await r.json()).error ?? "Retry failed");
+            setToast(r.ok ? "Retrying failed accounts" : (await r.json()).error ?? "Retry failed");
             void loadJobs();
           }}
         />

@@ -31,7 +31,7 @@ export function startMockGhl(port) {
         const loc = new URLSearchParams(body).get("locationId");
         return loc === "L3" ? j({ message: "App not installed" }, 403) : j({ access_token: "location-secret-" + loc, expires_in: 86399 });
       }
-      if (u.pathname === "/companies/co1") return j({ company: { name: "Acme Agency" } });
+      if (u.pathname === "/companies/co1") return j({ company: { name: "Acme Marketing" } });
       if (u.pathname === "/locations/search") return j({ locations: [locations.L1, locations.L2, locations.L3] });
       const single = u.pathname.match(/^\/locations\/(L\d)$/);
       if (single && req.method === "GET") return j({ location: locations[single[1]] });

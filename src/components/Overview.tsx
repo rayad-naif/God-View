@@ -37,13 +37,13 @@ export function KpiTiles({ data, onChurnClick }: { data: DashboardPayload; onChu
   );
 }
 
-export function AgencyTrend({ data }: { data: DashboardPayload }) {
+export function AccountsTrend({ data }: { data: DashboardPayload }) {
   const rows = data.daily.map((d) => ({ ...d, label: shortDate(d.date) }));
   const interval = Math.max(0, Math.ceil(rows.length / 8) - 1);
   return (
     <div className="grid lg:grid-cols-2 gap-3">
       <div className="card p-4">
-        <div className="text-sm font-semibold">Leads per day · all sub-accounts</div>
+        <div className="text-sm font-semibold">Leads per day · all accounts</div>
         <div className="h-44 mt-2">
           <ResponsiveContainer>
             <BarChart data={rows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap={2}>

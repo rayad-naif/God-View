@@ -39,7 +39,7 @@ export async function sendChurnAlerts(store: CompanyStore): Promise<{ newlyRed: 
     const byId = new Map(dash.accounts.map((a) => [a.id, a]));
     const lines: string[] = [];
     if (newlyRed.length) {
-      lines.push(`:rotating_light: *${newlyRed.length} sub-account${newlyRed.length > 1 ? "s" : ""} at churn risk* (${store.companyName ?? "agency"})`);
+      lines.push(`:rotating_light: *${newlyRed.length} account${newlyRed.length > 1 ? "s" : ""} at churn risk* (${store.companyName ?? "your workspace"})`);
       for (const id of newlyRed) {
         const a = byId.get(id)!;
         lines.push(`• *${a.name}*: under ${a.threshold} leads/day for ${a.lowStreak} days`);

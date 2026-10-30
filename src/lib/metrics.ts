@@ -98,7 +98,7 @@ export function computeDashboard(store: CompanyStore, days: number): DashboardPa
 
   return {
     mode: store.mode,
-    companyName: store.companyName ?? "Your agency",
+    companyName: store.companyName ?? "Your workspace",
     days,
     dates: range,
     settings,

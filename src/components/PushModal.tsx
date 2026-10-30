@@ -105,7 +105,7 @@ export default function PushModal({ accounts, metric, sourceId, initialTargets, 
                 <input className="input w-full !pl-8" placeholder="Search snapshots…" value={snapQ} onChange={(e) => setSnapQ(e.target.value)} autoFocus />
               </div>
               {snapErr && <div className="mt-3 text-sm text-[var(--critical-text)]">{snapErr}</div>}
-              {!snapshots && !snapErr && <div className="mt-6 text-sm text-ink-3">Loading snapshots from HighLevel…</div>}
+              {!snapshots && !snapErr && <div className="mt-6 text-sm text-ink-3">Loading snapshots from your CRM…</div>}
               <ul className="mt-3 space-y-1.5">
                 {scored.map(({ s, score }) => (
                   <li key={s.id}>
@@ -121,8 +121,9 @@ export default function PushModal({ accounts, metric, sourceId, initialTargets, 
                 {snapshots && !scored.length && <li className="text-sm text-ink-3 py-4">No snapshots found.</li>}
               </ul>
               <p className="mt-4 text-xs text-ink-3 leading-relaxed">
-                HighLevel pushes funnels and workflows through snapshots. To push one specific funnel or workflow, create a snapshot in
-                <b> Agency → Account Snapshots</b> from {source ? <b>{source.name}</b> : "the winning account"} that includes only those assets, then pick it here.
+                Your CRM moves funnels and workflows between accounts as snapshots. To push one specific funnel or workflow, create a snapshot in
+                your CRM’s <b>snapshot settings</b> from {source ? <b>{source.name}</b> : "the winning account"} that contains only those assets, then pick it here.
+                {" "}<a href="/docs#push" target="_blank" className="text-brand underline">How to prepare a snapshot</a>
               </p>
             </>
           )}
@@ -138,7 +139,7 @@ export default function PushModal({ accounts, metric, sourceId, initialTargets, 
               </div>
               <div className="relative mt-3">
                 <Search className="w-4 h-4 absolute left-2.5 top-2.5 text-ink-3" />
-                <input className="input w-full !pl-8" placeholder="Search sub-accounts…" value={targetQ} onChange={(e) => setTargetQ(e.target.value)} />
+                <input className="input w-full !pl-8" placeholder="Search accounts…" value={targetQ} onChange={(e) => setTargetQ(e.target.value)} />
               </div>
               <ul className="mt-2 divide-y divide-[var(--border)] border border-[var(--border)] rounded-lg max-h-[42vh] overflow-y-auto bg-[var(--surface-1)]">
                 {visible.map((a) => (
@@ -161,7 +162,7 @@ export default function PushModal({ accounts, metric, sourceId, initialTargets, 
               <div className="card p-4 text-sm space-y-1">
                 <div><span className="text-ink-3">Snapshot:</span> <b>{snapshot?.name}</b></div>
                 {source && <div><span className="text-ink-3">Winner:</span> {source.name}</div>}
-                <div><span className="text-ink-3">Targets:</span> <b>{targets.size}</b> sub-account{targets.size === 1 ? "" : "s"}</div>
+                <div><span className="text-ink-3">Targets:</span> <b>{targets.size}</b> account{targets.size === 1 ? "" : "s"}</div>
                 <div className="text-xs text-ink-3 pt-1 line-clamp-3">{pool.filter((a) => targets.has(a.id)).map((a) => a.name).join(", ")}</div>
               </div>
               <label className="flex items-start gap-3 card p-4 cursor-pointer">
@@ -176,7 +177,7 @@ export default function PushModal({ accounts, metric, sourceId, initialTargets, 
                   <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /> Overwritten assets can’t be restored from here. Make sure clients aren’t mid-campaign.
                 </div>
               )}
-              {mode === "demo" && <div className="text-xs text-ink-3">Demo mode: the push is simulated, so nothing is sent to HighLevel.</div>}
+              {mode === "demo" && <div className="text-xs text-ink-3">Demo mode: the push is simulated, so nothing is sent to your CRM.</div>}
               {error && <div className="text-sm text-[var(--critical-text)]">{error}</div>}
             </div>
           )}

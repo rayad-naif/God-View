@@ -8,7 +8,7 @@ export async function POST() {
   const url = store.settings.alertWebhookUrl;
   if (!url || !validAlertUrl(url)) return NextResponse.json({ error: "Save an https:// alert webhook URL first" }, { status: 400 });
   try {
-    await postAlert(url, `:wave: God View test alert for ${store.companyName ?? "your agency"}. Churn alerts will arrive here.`);
+    await postAlert(url, `:wave: God View test alert for ${store.companyName ?? "your workspace"}. Churn alerts will arrive here.`);
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "Webhook failed" }, { status: 502 });
