@@ -84,7 +84,7 @@ export async function getAgencyToken(store: CompanyStore): Promise<string> {
         refreshToken: data.refresh_token ?? auth.refreshToken,
         expiresAt: Date.now() + (data.expires_in ?? 86399) * 1000,
       };
-      await saveStore(store);
+      await saveStore(store, ["auth"]);
       return store.auth.accessToken;
     })().finally(() => refreshing.delete(store.companyId));
     refreshing.set(store.companyId, p);

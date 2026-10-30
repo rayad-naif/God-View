@@ -1,6 +1,7 @@
 import type { CompanyStore } from "./types";
 import { computeDashboard } from "./metrics";
 import { saveStore } from "./store";
+import { loadEmailStats } from "./email";
 
 export function validAlertUrl(url: string): boolean {
   try {
@@ -29,13 +30,17 @@ export async function sendChurnAlerts(store: CompanyStore): Promise<{ newlyRed: 
   const url = store.settings.alertWebhookUrl;
   // Without a destination we don't record anything, so accounts already red get announced once alerts are set up.
   if (!url || !validAlertUrl(url)) return { newlyRed: [], recovered: [] };
-  const dash = computeDashboard(store, 7);
+  const emailStats = store.mode === "live" ? await loadEmailStats(store.companyId, Object.keys(store.accounts)) : {};
+  const dash = computeDashboard(store, 7, emailStats);
+  const emailBad = new Set(dash.accounts.filter((a) => a.email.status === "critical").map((a) => a.id));
+  const emailAlready = new Set(store.alertedEmail ?? []);
+  const newlyEmail = [...emailBad].filter((id) => !emailAlready.has(id));
   const red = new Set(dash.accounts.filter((a) => a.status === "churn").map((a) => a.id));
   const already = new Set(store.alertedChurn ?? []);
   const newlyRed = [...red].filter((id) => !already.has(id));
   const recovered = [...already].filter((id) => !red.has(id) && store.accounts[id]);
 
-  if ((newlyRed.length || (store.settings.alertOnRecovery && recovered.length))) {
+  if (newlyRed.length || newlyEmail.length || (store.settings.alertOnRecovery && recovered.length)) {
     const byId = new Map(dash.accounts.map((a) => [a.id, a]));
     const lines: string[] = [];
     if (newlyRed.length) {
@@ -43,6 +48,13 @@ export async function sendChurnAlerts(store: CompanyStore): Promise<{ newlyRed: 
       for (const id of newlyRed) {
         const a = byId.get(id)!;
         lines.push(`• *${a.name}*: under ${a.threshold} leads/day for ${a.lowStreak} days`);
+      }
+    }
+    if (newlyEmail.length) {
+      lines.push(`:email: *${newlyEmail.length} account${newlyEmail.length > 1 ? "s" : ""} with email deliverability problems* (last 7 days)`);
+      for (const id of newlyEmail) {
+        const a = byId.get(id)!;
+        lines.push(`• *${a.name}*: ${a.email.reasons.join(", ")}`);
       }
     }
     if (store.settings.alertOnRecovery && recovered.length) {
@@ -57,6 +69,7 @@ export async function sendChurnAlerts(store: CompanyStore): Promise<{ newlyRed: 
     }
   }
   store.alertedChurn = [...red];
-  await saveStore(store);
+  store.alertedEmail = [...emailBad];
+  await saveStore(store, ["meta"]);
   return { newlyRed, recovered };
 }

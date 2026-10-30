@@ -1,11 +1,14 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { runScheduledSyncs } from "@/lib/scheduler";
+import { runCronSyncs } from "@/lib/scheduler";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
-/** External cron trigger (Vercel Cron, GitHub Actions, cron-job.org…). Send `Authorization: Bearer $CRON_SECRET`. */
+/**
+ * Scheduled sync. Vercel Cron calls this (see vercel.json) and sends `Authorization: Bearer $CRON_SECRET`
+ * automatically; any other scheduler can do the same. Each call starts or continues due workspaces.
+ */
 async function handle(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return NextResponse.json({ error: "CRON_SECRET is not set" }, { status: 503 });
@@ -14,8 +17,9 @@ async function handle(req: Request) {
   if (got.length !== want.length || !crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const synced = await runScheduledSyncs();
-  return NextResponse.json({ synced });
+  const budget = Math.min(Number(new URL(req.url).searchParams.get("budgetMs")) || 50_000, 55_000);
+  const { advanced, finished } = await runCronSyncs(budget);
+  return NextResponse.json({ synced: advanced, finished });
 }
 
 export const GET = handle;

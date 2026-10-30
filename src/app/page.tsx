@@ -17,7 +17,7 @@ const FEATURES = [
     icon: Siren,
     title: "Churn predictor",
     body: "An account turns red when its lead volume stays under your threshold for 3 straight days. Accounts heading that way are marked Watch, so you can step in before the client notices.",
-    points: ["Workspace default + per-account thresholds", "14-day lead heatmap of every at-risk account", "Slack alerts the moment an account turns red"],
+    points: ["Workspace default + per-account thresholds", "14-day lead heatmap of every at-risk account", "Email health: bounces, spam complaints, opens", "Slack alerts the moment an account turns red"],
   },
   {
     icon: Rocket,
@@ -31,7 +31,7 @@ const FAQ = [
   ["Which CRM does it work with?", "God View connects to CRMs that run multiple client accounts under one workspace and support OAuth app installs. Connect from the Home page, and the CRM's own sign-in screen asks you to approve access."],
   ["Do I need to install anything on each account?", "No. You connect once at the workspace level and God View reads every account you approve. New accounts are picked up automatically."],
   ["Can God View change my accounts?", "Only when you push a snapshot, and only to the accounts you select on the review screen. Everything else is read-only."],
-  ["Where does ad spend come from?", "Your CRM doesn't report ad spend, so God View reads it from a custom value on each account, a CSV you upload, or a daily amount you type in. See the Docs for the formats."],
+  ["Where does ad spend come from?", "From the Facebook, Google and LinkedIn ad accounts connected to each account in your CRM. You can also upload a CSV, type a daily amount, or use a custom value. See the Docs for details."],
   ["What happens to my data if I disconnect?", "Uninstalling God View from your CRM deletes your tokens, metrics and login from our servers. Details are in the Privacy Policy."],
 ];
 
@@ -113,7 +113,7 @@ export default function Home({ searchParams }: { searchParams: { error?: string 
           <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               [Bell, "Churn alerts", "Slack, Google Chat, Discord, Zapier or Make."],
-              [FileSpreadsheet, "Ad spend import", "Upload spend from your ad platforms as a CSV."],
+              [FileSpreadsheet, "Real ad spend", "Pulled from connected Facebook, Google and LinkedIn ad accounts, or imported by CSV."],
               [RefreshCw, "Always fresh", "Auto-sync every few hours, plus instant pickup of new accounts."],
               [Lock, "Secure by default", "Encrypted tokens, hashed passwords, signed webhooks."],
             ].map(([Icon, t, b]) => {

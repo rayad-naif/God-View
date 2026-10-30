@@ -1,10 +1,9 @@
 import { promises as fs } from "fs";
 import path from "path";
-import type { CompanyStore, Settings } from "./types";
+import type { Account, AuthTokens, CompanyStore, PushJob, Settings, SyncState } from "./types";
 import { decrypt, encrypt } from "./crypto";
 import { crmEnv } from "@/lib/env";
-
-const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
+import { kv } from "./kv";
 
 export const DEFAULT_SETTINGS: Settings = {
   churnThreshold: 3,
@@ -13,17 +12,34 @@ export const DEFAULT_SETTINGS: Settings = {
   syncWindowDays: 60,
 };
 
-// Survive Next.js dev hot-reloads.
-const g = globalThis as unknown as {
-  __gvStores?: Map<string, CompanyStore>;
-  __gvLocks?: Map<string, Promise<void>>;
+/*
+ * A company is stored as separate keys so that concurrent writers (a sync step, a push, a settings
+ * save, a token refresh) never overwrite each other's data:
+ *   gv:companies                  set of company ids
+ *   gv:co:<id>:meta               name, mode, settings, alert state
+ *   gv:co:<id>:auth               OAuth tokens (encrypted)
+ *   gv:co:<id>:tokens             per-account tokens (encrypted)
+ *   gv:co:<id>:sync               sync progress + resumable queue
+ *   gv:co:<id>:jobs               snapshot push jobs
+ *   gv:co:<id>:accts              set of account ids
+ *   gv:co:<id>:acct:<accountId>   one account's metrics
+ *   gv:co:<id>:email:<accountId>  email event counters (hash, see email.ts)
+ */
+const K = {
+  companies: "gv:companies",
+  meta: (c: string) => `gv:co:${c}:meta`,
+  auth: (c: string) => `gv:co:${c}:auth`,
+  tokens: (c: string) => `gv:co:${c}:tokens`,
+  sync: (c: string) => `gv:co:${c}:sync`,
+  jobs: (c: string) => `gv:co:${c}:jobs`,
+  accts: (c: string) => `gv:co:${c}:accts`,
+  acct: (c: string, a: string) => `gv:co:${c}:acct:${a}`,
+  email: (c: string, a: string) => `gv:co:${c}:email:${a}`,
 };
-const cache = (g.__gvStores ??= new Map());
-const locks = (g.__gvLocks ??= new Map());
+export const storeKeys = K;
 
-function fileFor(companyId: string) {
-  return path.join(DATA_DIR, `company-${companyId.replace(/[^a-zA-Z0-9_-]/g, "")}.json`);
-}
+export type Part = "meta" | "auth" | "tokens" | "sync" | "jobs" | "accounts";
+const ALL: Part[] = ["meta", "auth", "tokens", "sync", "jobs", "accounts"];
 
 export function emptyStore(companyId: string, mode: "live" | "demo"): CompanyStore {
   return {
@@ -37,63 +53,114 @@ export function emptyStore(companyId: string, mode: "live" | "demo"): CompanySto
   };
 }
 
+const parse = <T,>(s: string | null): T | undefined => {
+  if (!s) return undefined;
+  try { return JSON.parse(s) as T; } catch { return undefined; }
+};
+
 export async function loadStore(companyId: string): Promise<CompanyStore | null> {
-  const hit = cache.get(companyId);
-  if (hit) return hit;
-  try {
-    const raw = await fs.readFile(fileFor(companyId), "utf8");
-    const store = JSON.parse(raw) as CompanyStore;
-    if (store.auth) {
-      store.auth.accessToken = decrypt(store.auth.accessToken);
-      store.auth.refreshToken = decrypt(store.auth.refreshToken);
+  const db = kv();
+  const [meta, auth, tokens, sync, jobs] = await db.mget([K.meta(companyId), K.auth(companyId), K.tokens(companyId), K.sync(companyId), K.jobs(companyId)]);
+  if (!meta) return migrateLegacyFile(companyId);
+  const m = parse<{ companyName?: string; mode: "live" | "demo"; settings?: Partial<Settings>; alertedChurn?: string[]; alertedEmail?: string[]; uninstalledAt?: string }>(meta)!;
+  const ids = await db.smembers(K.accts(companyId));
+  const rows = await db.mget(ids.map((a) => K.acct(companyId, a)));
+  const accounts: Record<string, Account> = {};
+  rows.forEach((r) => { const a = parse<Account>(r); if (a) accounts[a.id] = a; });
+
+  const a = parse<AuthTokens>(auth);
+  if (a) { a.accessToken = decrypt(a.accessToken); a.refreshToken = decrypt(a.refreshToken); }
+  const t = parse<Record<string, { token: string; expiresAt: number }>>(tokens) ?? {};
+  for (const v of Object.values(t)) v.token = decrypt(v.token);
+
+  return {
+    companyId,
+    companyName: m.companyName,
+    mode: m.mode,
+    settings: { ...DEFAULT_SETTINGS, ...m.settings },
+    alertedChurn: m.alertedChurn,
+    alertedEmail: m.alertedEmail,
+    uninstalledAt: m.uninstalledAt,
+    auth: a,
+    locationTokens: t,
+    sync: parse<SyncState>(sync) ?? { running: false, total: 0, done: 0, errors: 0 },
+    pushJobs: parse<PushJob[]>(jobs) ?? [],
+    accounts,
+  };
+}
+
+/**
+ * Persists the given parts (all by default). `accountIds` limits which account rows are written
+ * when "accounts" is included.
+ */
+export async function saveStore(store: CompanyStore, parts: Part[] = ALL, accountIds?: string[]): Promise<void> {
+  const db = kv();
+  const c = store.companyId;
+  const w: Promise<unknown>[] = [db.sadd(K.companies, c)];
+  if (parts.includes("meta")) {
+    w.push(db.set(K.meta(c), JSON.stringify({ companyName: store.companyName, mode: store.mode, settings: store.settings, alertedChurn: store.alertedChurn, alertedEmail: store.alertedEmail, uninstalledAt: store.uninstalledAt })));
+  }
+  if (parts.includes("auth")) {
+    if (store.auth) w.push(db.set(K.auth(c), JSON.stringify({ ...store.auth, accessToken: encrypt(store.auth.accessToken), refreshToken: encrypt(store.auth.refreshToken) })));
+    else w.push(db.del(K.auth(c)));
+  }
+  if (parts.includes("tokens")) {
+    w.push(db.set(K.tokens(c), JSON.stringify(Object.fromEntries(Object.entries(store.locationTokens).map(([k, v]) => [k, { ...v, token: encrypt(v.token) }])))));
+  }
+  if (parts.includes("sync")) w.push(db.set(K.sync(c), JSON.stringify(store.sync)));
+  if (parts.includes("jobs")) w.push(db.set(K.jobs(c), JSON.stringify(store.pushJobs.slice(0, 50))));
+  if (parts.includes("accounts")) {
+    for (const id of accountIds ?? Object.keys(store.accounts)) {
+      const acc = store.accounts[id];
+      if (!acc) continue;
+      w.push(db.set(K.acct(c, id), JSON.stringify(acc)), db.sadd(K.accts(c), id));
     }
-    for (const t of Object.values(store.locationTokens ?? {})) t.token = decrypt(t.token);
-    store.settings = { ...DEFAULT_SETTINGS, ...store.settings };
-    // A sync can't still be running after a process restart.
-    store.sync.running = false;
-    cache.set(companyId, store);
+  }
+  await Promise.all(w);
+}
+
+/** Fresh sync state (used after taking the sync lock, so a stale copy is never resumed). */
+export async function loadSyncState(companyId: string): Promise<SyncState | undefined> {
+  return parse<SyncState>(await kv().get(K.sync(companyId)));
+}
+
+export async function loadAccount(companyId: string, accountId: string): Promise<Account | undefined> {
+  return parse<Account>(await kv().get(K.acct(companyId, accountId)));
+}
+
+export async function deleteAccount(companyId: string, accountId: string): Promise<void> {
+  const db = kv();
+  await Promise.all([db.del(K.acct(companyId, accountId), K.email(companyId, accountId)), db.srem(K.accts(companyId), accountId)]);
+}
+
+/** Company ids with saved data (for scheduled syncs). */
+export async function listCompanyIds(): Promise<string[]> {
+  return kv().smembers(K.companies);
+}
+
+export async function deleteStore(companyId: string): Promise<void> {
+  const db = kv();
+  const ids = await db.smembers(K.accts(companyId));
+  await db.del(
+    K.meta(companyId), K.auth(companyId), K.tokens(companyId), K.sync(companyId), K.jobs(companyId), K.accts(companyId),
+    ...ids.flatMap((a) => [K.acct(companyId, a), K.email(companyId, a)]),
+  );
+  await db.srem(K.companies, companyId);
+}
+
+/** Imports a pre-Redis `data/company-<id>.json` file once (Docker installs upgrading in place). */
+async function migrateLegacyFile(companyId: string): Promise<CompanyStore | null> {
+  if (kv().kind !== "file") return null;
+  const file = path.join(process.env.DATA_DIR || path.join(process.cwd(), "data"), `company-${companyId.replace(/[^a-zA-Z0-9_-]/g, "")}.json`);
+  try {
+    const old = JSON.parse(await fs.readFile(file, "utf8")) as CompanyStore;
+    if (old.auth) { old.auth.accessToken = decrypt(old.auth.accessToken); old.auth.refreshToken = decrypt(old.auth.refreshToken); }
+    for (const v of Object.values(old.locationTokens ?? {})) v.token = decrypt(v.token);
+    const store: CompanyStore = { ...emptyStore(companyId, old.mode), ...old, settings: { ...DEFAULT_SETTINGS, ...old.settings }, sync: { ...old.sync, running: false } };
+    await saveStore(store);
+    await fs.rename(file, `${file}.migrated`);
     return store;
   } catch {
     return null;
   }
-}
-
-export async function saveStore(store: CompanyStore): Promise<void> {
-  cache.set(store.companyId, store);
-  // Serialise writes per company; write to temp then rename for atomicity.
-  const prev = locks.get(store.companyId) ?? Promise.resolve();
-  const next = prev.then(async () => {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    const file = fileFor(store.companyId);
-    const tmp = `${file}.${process.pid}.tmp`;
-    await fs.writeFile(tmp, serialise(store), { mode: 0o600 });
-    await fs.rename(tmp, file);
-  });
-  locks.set(store.companyId, next.catch(() => {}));
-  return next;
-}
-
-/** JSON with every OAuth token encrypted. */
-function serialise(store: CompanyStore): string {
-  const out: CompanyStore = {
-    ...store,
-    auth: store.auth && { ...store.auth, accessToken: encrypt(store.auth.accessToken), refreshToken: encrypt(store.auth.refreshToken) },
-    locationTokens: Object.fromEntries(Object.entries(store.locationTokens).map(([k, v]) => [k, { ...v, token: encrypt(v.token) }])),
-  };
-  return JSON.stringify(out);
-}
-
-/** Company ids that have a saved store (for scheduled syncs). */
-export async function listCompanyIds(): Promise<string[]> {
-  try {
-    const files = await fs.readdir(DATA_DIR);
-    return files.filter((f) => /^company-.+\.json$/.test(f)).map((f) => f.slice(8, -5));
-  } catch {
-    return [];
-  }
-}
-
-export async function deleteStore(companyId: string): Promise<void> {
-  cache.delete(companyId);
-  await fs.rm(fileFor(companyId), { force: true });
 }

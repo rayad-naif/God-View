@@ -52,6 +52,16 @@ export function startMockGhl(port) {
       if (u.pathname === "/opportunities/search") return j({ opportunities: [{ monetaryValue: 5000, status: "won", lastStatusChangeAt: iso(2) }], meta: {} });
       if (u.pathname === "/calendars/") return j({ calendars: [{ id: "c1" }] });
       if (u.pathname === "/calendars/events") return j({ events: [{ startTime: iso(1), appointmentStatus: "showed" }, { startTime: iso(2), appointmentStatus: "noshow" }, { startTime: iso(3), appointmentStatus: "showed" }] });
+      // Ad reporting: Alpha has Facebook ($30/day) + Google ($15/day); others have no ad accounts.
+      if (u.pathname.startsWith("/ad-publishing/")) {
+        const loc = u.searchParams.get("locationId");
+        if (loc !== "L1") return j({ message: "Integration not found" }, 404);
+        const days = [];
+        for (let d = new Date(u.searchParams.get("startDate")); d <= new Date(u.searchParams.get("endDate")); d = new Date(d.getTime() + day)) days.push(d.toISOString().slice(0, 10));
+        if (u.pathname === "/ad-publishing/facebook/reporting") return j({ success: true, data: { summary: { spend: "999" }, rows: days.map((d) => ({ date_start: d, date_stop: d, spend: "30.00" })) } });
+        if (u.pathname === "/ad-publishing/google/reporting") return j({ results: days.map((d) => ({ segments: { date: d }, metrics: { cost_micros: "15000000" } })) });
+        return j({ message: "not connected" }, 404);
+      }
       if (u.pathname.endsWith("/customValues")) return j({ customValues: [{ name: "Ad Spend Daily", fieldKey: "{{ custom_values.ad_spend_daily }}", value: "50" }] });
       if (u.pathname === "/snapshots/") return j({ snapshots: [{ id: "s1", name: "Alpha Roofing winner funnel", type: "own" }] });
       if (u.pathname.startsWith("/snapshots/snapshot-status/")) return j({ data: [{ status: "completed", dateAdded: iso(0) }] });

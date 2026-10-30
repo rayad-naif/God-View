@@ -5,6 +5,7 @@ import { X, Rocket, Wrench, Save } from "lucide-react";
 import type { AccountMetrics } from "@/lib/types";
 import { METRICS, MetricKey, change, money, num, pct, relTime, shortDate } from "@/lib/format";
 import { ChartTooltip, Delta, StatusPill } from "./ui";
+import { EmailPill } from "./EmailHealth";
 
 type Props = {
   account: AccountMetrics;
@@ -91,6 +92,8 @@ export default function AccountDrawer({ account: a, rank, total, metric, onClose
             ))}
           </div>
 
+          {a.spendSource && <div className="text-xs text-ink-3 -mt-2">Ad spend from: <b className="text-ink-2">{a.spendSource}</b></div>}
+
           <section className="card p-4">
             <div className="text-sm font-semibold">Daily leads</div>
             <div className="text-xs text-ink-3">Dashed line = churn threshold ({a.threshold}/day)</div>
@@ -145,6 +148,48 @@ export default function AccountDrawer({ account: a, rank, total, metric, onClose
                 </BarChart>
               </ResponsiveContainer>
             </div>
+          </section>
+
+          <section className="card p-4">
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-semibold flex-1">Email health</div>
+              <EmailPill status={a.email.status} reasons={a.email.reasons} />
+            </div>
+            {a.email.delivered + a.email.bounced === 0 ? (
+              <div className="text-xs text-ink-3 mt-1">No email events for this account in this period.</div>
+            ) : (
+              <>
+                <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
+                  {[
+                    ["Delivered", num(a.email.delivered)],
+                    ["Open rate", pct(a.email.openRate)],
+                    ["Not opened", num(a.email.notOpened)],
+                    ["Bounced", `${num(a.email.bounced)} · ${pct(a.email.bounceRate, 1)}`],
+                    ["Spam", `${num(a.email.complained)} · ${pct(a.email.spamRate, 2)}`],
+                    ["Unsubs", num(a.email.unsubscribed)],
+                  ].map(([l, v]) => (
+                    <div key={l} className="rounded-lg bg-[var(--surface-2)] px-2 py-2">
+                      <div className="text-[11px] text-ink-2">{l}</div>
+                      <div className="text-sm font-semibold tnum">{v}</div>
+                    </div>
+                  ))}
+                </div>
+                {a.email.reasons.length > 0 && <div className="mt-2 text-xs text-[var(--critical-text)]">{a.email.reasons.join(" · ")}</div>}
+                <div className="h-40 mt-3">
+                  <ResponsiveContainer>
+                    <BarChart data={a.emailSeries.map((r) => ({ ...r, notOpened: Math.max(0, r.delivered - r.opened), label: shortDate(r.date) }))} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} barCategoryGap={2}>
+                      <CartesianGrid vertical={false} />
+                      <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: "var(--axis)" }} interval={interval} />
+                      <YAxis tickLine={false} axisLine={false} allowDecimals={false} />
+                      <Tooltip cursor={{ fill: "var(--surface-2)" }} content={<ChartTooltip />} />
+                      <Legend iconType="square" iconSize={10} wrapperStyle={{ fontSize: 12, color: "var(--text-secondary)" }} />
+                      <Bar dataKey="opened" name="Opened" stackId="e" fill="var(--series-1)" stroke="var(--surface-1)" strokeWidth={1} />
+                      <Bar dataKey="notOpened" name="Not opened" stackId="e" fill="var(--series-2)" stroke="var(--surface-1)" strokeWidth={1} radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
           </section>
 
           <section className="card p-4">

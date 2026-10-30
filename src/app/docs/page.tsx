@@ -17,6 +17,7 @@ const SECTIONS = [
   { id: "metrics", title: "Metric definitions" },
   { id: "account-details", title: "Account details" },
   { id: "churn", title: "Churn predictor" },
+  { id: "email-health", title: "Email health" },
   { id: "push", title: "Snapshot push" },
   { id: "ad-spend", title: "Ad spend & CPL" },
   { id: "alerts", title: "Churn alerts" },
@@ -138,7 +139,7 @@ export default function Docs() {
             <thead><tr><th>Metric</th><th>Formula</th><th>Source in your CRM</th></tr></thead>
             <tbody>
               <tr><td>Leads</td><td>Contacts created in the period</td><td>Each contact's <em>date added</em>, counted in the account's own timezone</td></tr>
-              <tr><td>Ad spend</td><td>Sum of daily spend</td><td>CSV import, a manual daily amount, or a custom value (see <a href="#ad-spend">Ad spend</a>)</td></tr>
+              <tr><td>Ad spend</td><td>Sum of daily spend</td><td>Connected ad platforms, CSV import, a manual daily amount, or a custom value (see <a href="#ad-spend">Ad spend</a>)</td></tr>
               <tr><td>CPL</td><td>Ad spend ÷ leads</td><td>Shown only when the account has spend</td></tr>
               <tr><td>Show rate</td><td>Showed ÷ (showed + no-show)</td><td>Appointment status across every calendar in the account. Cancelled and still-pending appointments are excluded.</td></tr>
               <tr><td>Revenue</td><td>Sum of won opportunity values</td><td>Opportunities marked <em>won</em>, dated by when they were marked won</td></tr>
@@ -180,6 +181,39 @@ export default function Docs() {
           <p>Start with roughly a third of an account's normal daily lead volume. Too high and healthy accounts flicker amber on slow weekends; too low and real drops are caught late.</p>
 
           {/* ---------------------------------------------------------------- */}
+          <h2 id="email-health">Email health</h2>
+          <p>
+            Bad deliverability quietly kills a client's results: emails land in spam, appointments aren't confirmed, and leads go cold. {n} watches every email your CRM sends
+            and shows, per account:
+          </p>
+          <table>
+            <thead><tr><th>Number</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td>Delivered</td><td>Emails accepted by the recipient's mail server</td></tr>
+              <tr><td>Open rate</td><td>Unique opens ÷ delivered (each email counts once however often it's opened)</td></tr>
+              <tr><td>Not opened</td><td>Delivered − opened</td></tr>
+              <tr><td>Bounce rate</td><td>Permanent failures ÷ (delivered + bounced). Temporary failures are retried by the sender and not counted.</td></tr>
+              <tr><td>Spam rate</td><td>Spam complaints ÷ delivered</td></tr>
+              <tr><td>Unsubscribes</td><td>Recipients who unsubscribed</td></tr>
+            </tbody>
+          </table>
+          <h3>Health status</h3>
+          <ul>
+            <li><strong>Critical (red)</strong>: spam complaints over <strong>0.3%</strong> (the level where Gmail and Yahoo start blocking senders) or bounces over <strong>5%</strong>.</li>
+            <li><strong>Watch (amber)</strong>: spam over 0.1%, bounces over 2%, open rate under 15% (often a sign of landing in spam), or unsubscribes over 1%.</li>
+            <li><strong>Low volume</strong>: fewer than 20 emails in the period, so no verdict yet.</li>
+          </ul>
+          <p>
+            The <strong>Email health</strong> section on the dashboard lists problem accounts first, and each account's detail panel shows its daily opened vs not-opened chart.
+            Accounts that turn critical are included in your <a href="#alerts">alerts</a>.
+          </p>
+          <h3>Turning it on</h3>
+          <ol>
+            <li>Approve the <strong>email</strong> permission when you connect (reconnect from Settings if you connected before it existed).</li>
+            <li>Make sure the CRM app sends the <strong>email stats</strong> webhook event to {n} (see <a href="#self-hosting">Self-hosting</a>). Events arrive as emails are sent, so numbers build up from that point on. Past emails are not backfilled.</li>
+          </ol>
+          <div className="callout warn">Your CRM only sends email events to apps installed on each account. If an account shows no email data, check that {n} is approved for that account.</div>
+
           <h2 id="push">Snapshot push</h2>
           <p>
             Your CRM packages funnels, workflows, forms, calendars and other assets into <strong>snapshots</strong>. {n} lets you load one snapshot into many accounts in a single action.
@@ -219,12 +253,14 @@ export default function Docs() {
 
           {/* ---------------------------------------------------------------- */}
           <h2 id="ad-spend">Ad spend &amp; CPL</h2>
-          <p>CRMs record leads but usually not what you paid for them, so {n} takes spend from up to three sources. For each account and day it uses the first one available:</p>
+          <p>{n} takes spend from up to four sources. For each account and day it uses the first one available:</p>
           <ol>
             <li><strong>CSV import</strong> (Settings → Import ad spend)</li>
             <li><strong>Manual daily amount</strong> (account details → Overrides)</li>
+            <li><strong>Connected ad platforms</strong>: Facebook/Instagram, Google and LinkedIn ad accounts connected to the account in your CRM's ad manager. This is synced automatically and needs no setup beyond approving the ad reporting permission.</li>
             <li><strong>Custom value</strong> in the account in your CRM (synced automatically)</li>
           </ol>
+          <p>The account's detail panel shows which source its spend came from.</p>
           <h3>CSV import</h3>
           <p>Export spend by day from Meta Ads Manager, Google Ads or your reporting tool, then shape it like this. <strong>Download template</strong> gives you a file with every account already listed.</p>
           <pre><code>{`account_id,name,date,spend
@@ -255,6 +291,7 @@ abc123,Summit Roofing,2026-10-28,142.50
 • Summit Solar: under 5 leads/day for 4 days`}</code></pre>
           <ul>
             <li>Each account alerts <strong>once</strong> until it recovers, so you won't be spammed every sync.</li>
+            <li>Accounts whose <a href="#email-health">email health</a> turns critical (spam complaints or bounces) are included in the same message.</li>
             <li>Tick <em>Also notify when a red account recovers</em> for an all-clear message.</li>
             <li>Accounts that were already red when you first set up alerts are included in the next alert.</li>
             <li>Works with Slack, Google Chat, Discord (add <code>/slack</code> to the end of the webhook URL), Zapier and Make. The URL must start with <code>https://</code>.</li>
@@ -263,7 +300,7 @@ abc123,Summit Roofing,2026-10-28,142.50
           {/* ---------------------------------------------------------------- */}
           <h2 id="sync">Data sync</h2>
           <ul>
-            <li><strong>Automatic</strong>: every account is re-synced every 6 hours by default.</li>
+            <li><strong>Automatic</strong>: every account is re-synced every 6 hours by default. On Vercel this is done by Vercel Cron (see <a href="#self-hosting">Self-hosting</a>), and an open dashboard also keeps a running sync moving.</li>
             <li><strong>Manual</strong>: the sync button in the header starts a sync immediately and shows <em>Syncing 42/100</em> while it runs.</li>
             <li><strong>New accounts</strong>: when the CRM webhook is configured, accounts created in your CRM are synced within seconds.</li>
             <li><strong>History</strong>: each sync reads the last 60 days by default, enough for a 30-day view plus its comparison period. Change it in Settings (14–180 days).</li>
@@ -298,6 +335,8 @@ abc123,Summit Roofing,2026-10-28,142.50
               <tr><td>Read calendars &amp; appointments</td><td>Calculate show rate</td></tr>
               <tr><td>Read custom values</td><td>Read the ad spend value</td></tr>
               <tr><td>Read snapshots</td><td>List snapshots and check push progress</td></tr>
+              <tr><td>Read ad reporting</td><td>Daily spend from connected Facebook, Google and LinkedIn ad accounts</td></tr>
+              <tr><td>Read email events</td><td>Count deliveries, opens, bounces, spam complaints and unsubscribes. Only daily counts are stored, never recipients or content.</td></tr>
               <tr><td>Update accounts</td><td><strong>Only</strong> to load a snapshot you push</td></tr>
               <tr><td>Issue account-level access</td><td>Read each account with its own short-lived access token</td></tr>
             </tbody>
@@ -309,7 +348,7 @@ abc123,Summit Roofing,2026-10-28,142.50
             <li>Sessions are signed, httpOnly cookies. Changing your password signs out every other session.</li>
             <li>Sign-in is rate-limited to slow down password guessing.</li>
             <li>Webhooks from your CRM must carry a valid signature, and unsigned requests are rejected.</li>
-            <li>Only <strong>aggregated daily numbers</strong> are stored (lead counts, appointment counts, revenue totals, spend). Individual contacts, messages and appointment details are not.</li>
+            <li>Only <strong>aggregated daily numbers</strong> are stored (lead counts, appointment counts, revenue totals, spend, email event counts). Individual contacts, recipients, messages and appointment details are not.</li>
           </ul>
           <h3>Disconnecting &amp; deleting your data</h3>
           <p>
@@ -319,37 +358,47 @@ abc123,Summit Roofing,2026-10-28,142.50
 
           {/* ---------------------------------------------------------------- */}
           <h2 id="self-hosting">Self-hosting</h2>
-          <p>{n} is a Node.js (Next.js) app. Run it on any long-running host (Docker, Render, Fly.io, Railway or a VM) with a persistent disk for <code>/app/data</code>.</p>
+          <p>{n} is a Next.js app. It runs on <strong>Vercel</strong> (with Upstash Redis for storage) or on any long-running Node host such as Docker, Render, Fly.io or a VM.</p>
           <h3>1. Register an app in your CRM's developer portal</h3>
           <ul>
             <li>Distribution: <strong>workspace level</strong>, so one install covers all accounts.</li>
             <li>Redirect URL: <code>https://your-domain/api/auth/callback</code></li>
-            <li>Webhook URL: <code>https://your-domain/api/webhooks/crm</code>. Subscribe to install, uninstall and account-created events.</li>
+            <li>Webhook URL: <code>https://your-domain/api/webhooks/crm</code>. Subscribe to <code>INSTALL</code>, <code>UNINSTALL</code>, <code>LocationCreate</code> and <code>LCEmailStats</code>.</li>
             <li>Permissions (exact identifiers):
-              <pre><code>locations.readonly locations.write locations/customValues.readonly oauth.readonly oauth.write companies.readonly contacts.readonly opportunities.readonly calendars.readonly calendars/events.readonly snapshots.readonly</code></pre>
+              <pre><code>locations.readonly locations.write locations/customValues.readonly oauth.readonly oauth.write companies.readonly contacts.readonly opportunities.readonly calendars.readonly calendars/events.readonly snapshots.readonly adPublishing.readonly lc-email.readonly</code></pre>
+              If you tick extra permissions in the app, add them to <code>CRM_EXTRA_SCOPES</code> so the requested list matches.
             </li>
           </ul>
           <h3>2. Configure environment variables</h3>
           <table>
             <thead><tr><th>Variable</th><th>Required</th><th>Purpose</th></tr></thead>
             <tbody>
-              <tr><td><code>CRM_CLIENT_ID</code></td><td>Yes</td><td>OAuth client ID from your CRM app</td></tr>
-              <tr><td><code>CRM_CLIENT_SECRET</code></td><td>Yes</td><td>OAuth client secret</td></tr>
+              <tr><td><code>CRM_CLIENT_ID</code>, <code>CRM_CLIENT_SECRET</code></td><td>Yes</td><td>OAuth credentials from your CRM app</td></tr>
               <tr><td><code>CRM_REDIRECT_URI</code></td><td>Yes</td><td>Must exactly match the redirect URL above</td></tr>
               <tr><td><code>CRM_APP_ID</code></td><td>Recommended</td><td>Limits sync to accounts with the app installed, and ignores other apps' webhooks</td></tr>
-              <tr><td><code>SESSION_SECRET</code></td><td>Yes</td><td>32+ random characters; signs sessions (<code>openssl rand -hex 32</code>)</td></tr>
-              <tr><td><code>TOKEN_ENCRYPTION_KEY</code></td><td>Recommended</td><td>64 hex chars; encrypts CRM tokens at rest</td></tr>
-              <tr><td><code>CRM_WEBHOOK_ED25519_PUBLIC_KEY</code></td><td>Yes, for webhooks</td><td>Your CRM's published webhook public key (PEM)</td></tr>
-              <tr><td><code>AUTO_SYNC_HOURS</code></td><td>No</td><td>Sync interval in hours (default 6, 0 disables it)</td></tr>
-              <tr><td><code>CRON_SECRET</code></td><td>No</td><td>Enables <code>/api/cron/sync</code> for external schedulers (send <code>Authorization: Bearer …</code>)</td></tr>
-              <tr><td><code>APP_URL</code></td><td>No</td><td>Public URL, used for links in alerts</td></tr>
+              <tr><td><code>SESSION_SECRET</code></td><td>Yes</td><td>64 random hex characters (<code>openssl rand -hex 32</code>); signs sessions</td></tr>
+              <tr><td><code>TOKEN_ENCRYPTION_KEY</code></td><td>Yes</td><td>A different 64 random hex characters; encrypts CRM tokens at rest. Never change it after launch, or stored tokens can't be read.</td></tr>
+              <tr><td><code>UPSTASH_REDIS_REST_URL</code>, <code>UPSTASH_REDIS_REST_TOKEN</code></td><td>Yes on Vercel</td><td>Storage. Vercel's Upstash integration sets <code>KV_REST_API_URL</code> / <code>KV_REST_API_TOKEN</code>, which also work. Without them, data is kept in files (Docker/VM only).</td></tr>
+              <tr><td><code>CRON_SECRET</code></td><td>Yes on Vercel</td><td>Protects <code>/api/cron/sync</code>. Vercel Cron sends it automatically.</td></tr>
+              <tr><td><code>APP_URL</code></td><td>Recommended</td><td>Public URL, used for links in alerts</td></tr>
+              <tr><td><code>AUTO_SYNC_HOURS</code></td><td>No</td><td>How often each workspace re-syncs (default 6)</td></tr>
+              <tr><td><code>CRM_EXTRA_SCOPES</code></td><td>No</td><td>Extra permission identifiers to request, space-separated</td></tr>
+              <tr><td><code>CRM_WEBHOOK_PUBLIC_KEY</code>, <code>CRM_WEBHOOK_ED25519_PUBLIC_KEY</code></td><td>No</td><td>Only if your CRM rotates its webhook signing key. The current published key is built in.</td></tr>
               <tr><td><code>SUPPORT_EMAIL</code>, <code>LEGAL_ENTITY_NAME</code>, <code>LEGAL_JURISDICTION</code></td><td>Yes, before launch</td><td>Shown on the Privacy and Terms pages</td></tr>
             </tbody>
           </table>
-          <h3>3. Run</h3>
+          <h3>3a. Deploy on Vercel</h3>
+          <ol>
+            <li>Import the repository in Vercel.</li>
+            <li>Storage → <strong>Upstash Redis</strong> → create a database and connect it to the project (this adds the Redis variables).</li>
+            <li>Add the other variables above, then redeploy.</li>
+            <li>The included <code>vercel.json</code> schedules <code>/api/cron/sync</code> once a day, the most Vercel's Hobby plan allows. On Pro, change the schedule to <code>*/15 * * * *</code>: each run continues any sync in progress and starts a new one when a workspace is due.</li>
+          </ol>
+          <p>Vercel stops functions after they respond, so syncs run in short resumable steps: the cron job and any open dashboard keep them moving until all accounts are done.</p>
+          <h3>3b. Deploy with Docker</h3>
           <pre><code>{`docker compose up -d --build      # reads .env.local, data in a named volume
-# health check
 curl https://your-domain/api/health`}</code></pre>
+          <p>Without Redis variables, data is stored in <code>/app/data</code>, so keep it on a persistent volume. A built-in timer handles scheduled syncs.</p>
 
           {/* ---------------------------------------------------------------- */}
           <h2 id="troubleshooting">Troubleshooting</h2>
@@ -365,6 +414,8 @@ curl https://your-domain/api/health`}</code></pre>
               <tr><td>"Setup link expired"</td><td>More than 30 minutes passed after connecting. Click <em>Connect CRM again</em>.</td></tr>
               <tr><td>"Too many attempts"</td><td>Sign-in is paused for 15 minutes after repeated failures. Use <em>Forgot password?</em> if needed.</td></tr>
               <tr><td>Numbers seem a day off</td><td>Days are counted in each account's timezone. Check the timezone set on the account in your CRM.</td></tr>
+              <tr><td>Email health says "No email events yet"</td><td>The email permission wasn't approved, the CRM app isn't sending the email stats webhook, or no emails have been sent since. Reconnect from Settings and check the app's webhook events.</td></tr>
+              <tr><td>CPL uses the wrong spend</td><td>The detail panel shows the spend source. CSV imports and manual amounts win over ad platforms, so clear them if you want ad-platform spend.</td></tr>
               <tr><td>Test alert fails</td><td>The webhook URL must start with <code>https://</code> and be active. Create a fresh webhook in your chat tool.</td></tr>
             </tbody>
           </table>

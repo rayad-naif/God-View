@@ -172,3 +172,74 @@ export async function snapshotPushStatus(store: CompanyStore, snapshotId: string
   rows.sort((a, b) => String(b.dateAdded ?? "").localeCompare(String(a.dateAdded ?? "")));
   return String(rows[0].status ?? "").toLowerCase() || null;
 }
+
+// ---------- ad platforms (Ad Manager reporting, scope adPublishing.readonly) ----------
+
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+
+function toDate(v: unknown): string | null {
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+  if (typeof v === "number" && v > 1e9) return new Date(v > 1e12 ? v : v * 1000).toISOString().slice(0, 10);
+  if (v && typeof v === "object" && "year" in v && "month" in v && "day" in v) {
+    const o = v as { year: number; month: number; day: number };
+    return `${o.year}-${String(o.month).padStart(2, "0")}-${String(o.day).padStart(2, "0")}`;
+  }
+  return null;
+}
+const num = (v: unknown) => (v == null || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : null);
+
+/** Pulls a (date, spend) pair out of one reporting row, whatever the platform's field names. */
+function rowSpend(r: any): [string, number] | null {
+  if (!r || typeof r !== "object" || Array.isArray(r)) return null;
+  const date =
+    toDate(r.date) ?? toDate(r.date_start) ?? toDate(r.dateStart) ?? toDate(r.day) ?? toDate(r.segments?.date) ??
+    toDate(r.dateRange?.start) ?? toDate(r.timeRange?.start) ?? toDate(r.startDate);
+  if (!date) return null;
+  const m = r.metrics ?? r;
+  const micros = num(m.cost_micros) ?? num(m.costMicros);
+  const spend = micros != null ? micros / 1e6 : num(m.spend) ?? num(m.amountSpent) ?? num(m.costInLocalCurrency) ?? num(m.costInUsd) ?? num(m.cost);
+  return spend == null ? null : [date, spend];
+}
+
+/** Finds the first array of dated spend rows anywhere in a reporting response (breadth-first). */
+export function extractDailySpend(json: unknown): Record<string, number> | null {
+  const queue: unknown[] = [json];
+  while (queue.length) {
+    const cur = queue.shift();
+    if (Array.isArray(cur)) {
+      const rows = cur.map(rowSpend).filter(Boolean) as [string, number][];
+      if (rows.length) {
+        const out: Record<string, number> = {};
+        for (const [d, v] of rows) out[d] = Math.round(((out[d] ?? 0) + v) * 100) / 100;
+        return out;
+      }
+      queue.push(...cur.filter((x) => x && typeof x === "object"));
+    } else if (cur && typeof cur === "object") {
+      queue.push(...Object.values(cur));
+    }
+  }
+  return null;
+}
+
+/**
+ * Daily ad spend from the ad platforms connected to the account in the CRM (Facebook/Instagram,
+ * Google, LinkedIn), summed per day. Returns null when no platform reports anything.
+ */
+export async function fetchAdPlatformSpend(store: CompanyStore, locationId: string, from: Date, to: Date): Promise<Record<string, number> | null> {
+  const token = await getLocationToken(store, locationId);
+  const range = { locationId, startDate: ymd(from), endDate: ymd(to) };
+  const calls: [string, Record<string, string>][] = [
+    ["/ad-publishing/facebook/reporting", { ...range, groupBy: "day", type: "INTEGRATION", fields: "spend" }],
+    ["/ad-publishing/google/reporting", { ...range, groupBy: "date", type: "INTEGRATION", fields: "cost_micros" }],
+    ["/ad-publishing/linkedin/reporting", { ...range, groupBy: "day", fields: "costInLocalCurrency,dateRange" }],
+  ];
+  const results = await Promise.all(calls.map(([path, query]) => ghlFetch<any>(path, token, { query }).then(extractDailySpend).catch(() => null)));
+  const total: Record<string, number> = {};
+  let any = false;
+  for (const r of results) {
+    if (!r) continue;
+    any = true;
+    for (const [d, v] of Object.entries(r)) total[d] = Math.round(((total[d] ?? 0) + v) * 100) / 100;
+  }
+  return any ? total : null;
+}

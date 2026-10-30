@@ -4,7 +4,7 @@ import { exchangeCode } from "@/lib/ghl/oauth";
 import { emptyStore, loadStore, saveStore } from "@/lib/store";
 import { getSession, setupCookie, setupToken } from "@/lib/session";
 import { findUserByCompany } from "@/lib/users";
-import { startSync } from "@/lib/sync";
+import { kickOffSync } from "@/lib/sync";
 import { getCompanyName } from "@/lib/ghl/resources";
 
 export async function GET(req: Request) {
@@ -41,7 +41,7 @@ export async function GET(req: Request) {
     store.locationTokens = {};
     if (!store.companyName) store.companyName = await getCompanyName(store);
     await saveStore(store);
-    void startSync(store);
+    await kickOffSync(store);
 
     const owner = await findUserByCompany(t.companyId);
     const session = await getSession();

@@ -14,17 +14,16 @@ export async function POST(req: Request) {
   const email = normaliseEmail(String(body.email ?? ""));
   const password = String(body.password ?? "");
   const ipKey = `ip:${clientIp(req)}`, emailKey = `email:${email}`;
-  if (rateLimited(ipKey, 30) || rateLimited(emailKey)) {
+  if ((await rateLimited(ipKey, 30)) || (await rateLimited(emailKey))) {
     return NextResponse.json({ error: "Too many attempts. Wait 15 minutes and try again." }, { status: 429 });
   }
   const user = email ? await findUserByEmail(email) : undefined;
   const ok = await verifyPassword(password, user?.passwordHash);
   if (!user || !ok) {
-    recordFailure(ipKey);
-    recordFailure(emailKey);
+    await Promise.all([recordFailure(ipKey), recordFailure(emailKey)]);
     return NextResponse.json({ error: "Email or password is incorrect." }, { status: 401 });
   }
-  clearFailures(emailKey);
+  await clearFailures(emailKey);
   await updateUser(user.id, { lastLoginAt: new Date().toISOString() });
   const res = NextResponse.json({ ok: true });
   res.cookies.set(sessionCookie.name, userSessionToken(user.id, user.sessionVersion), sessionCookie.options);

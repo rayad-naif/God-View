@@ -1,13 +1,18 @@
-// End-to-end test of the live (OAuth) path against a mock HighLevel API.
-// Usage: npm run build && npm test
+// End-to-end test of the live (OAuth) path against a mock CRM API.
+// Usage: npm run build && npm test   (runs this file in file, Redis and serverless+Redis modes)
+//   GV_TEST_STORAGE=file|redis   GV_TEST_SERVERLESS=1
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { startMockGhl } from "./mock-ghl.mjs";
+import { startMockRedis } from "./mock-redis.mjs";
 
-const MOCK = 4655, APP = 3155, BASE = `http://localhost:${APP}`;
+const REDIS = process.env.GV_TEST_STORAGE === "redis";
+const SERVERLESS = process.env.GV_TEST_SERVERLESS === "1";
+const MOCK = 4655, APP = 3155, REDIS_PORT = 4656, BASE = `http://localhost:${APP}`;
+console.log(`\n=== storage: ${REDIS ? "Upstash Redis (mock)" : "files"}${SERVERLESS ? " · serverless mode" : ""} ===`);
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "gv-test-"));
 const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
 const CRON_SECRET = "test-cron-secret";
@@ -20,6 +25,23 @@ const check = (name, cond, extra = "") => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const mock = await startMockGhl(MOCK);
+const redis = REDIS ? await startMockRedis(REDIS_PORT, "test-redis-token") : null;
+
+/** Every stored key/value, from the mock Redis or the file store. */
+function dumpKV() {
+  if (redis) return redis.dump();
+  const dir = path.join(dataDir, "kv");
+  const out = {};
+  if (!fs.existsSync(dir)) return out;
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith(".json")) continue;
+    const key = Buffer.from(f.slice(0, -5), "base64url").toString();
+    const v = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")).v;
+    out[key] = typeof v === "string" ? v : JSON.stringify(v);
+  }
+  return out;
+}
+const userRecords = () => Object.entries(dumpKV()).filter(([k]) => /^gv:user:/.test(k)).map(([, v]) => JSON.parse(v));
 const app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-p", String(APP)], {
   env: {
     ...process.env,
@@ -33,7 +55,10 @@ const app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start",
     GHL_WEBHOOK_ED25519_PUBLIC_KEY: publicKey.export({ type: "spki", format: "pem" }),
     CRON_SECRET,
     DATA_DIR: dataDir,
-    AUTO_SYNC_HOURS: "0",
+    AUTO_SYNC_HOURS: "0.0001",
+    GV_DISABLE_SCHEDULER: "1",
+    ...(REDIS ? { UPSTASH_REDIS_REST_URL: `http://localhost:${REDIS_PORT}`, UPSTASH_REDIS_REST_TOKEN: "test-redis-token" } : {}),
+    ...(SERVERLESS ? { SERVERLESS: "true" } : {}),
     ALLOW_LOCALHOST_ALERTS: "true",
   },
   stdio: ["ignore", "pipe", "pipe"],
@@ -50,7 +75,7 @@ const req = async (p, opts = {}) => {
   return { status: r.status, headers: r.headers, json, text };
 };
 const post = (p, body) => req(p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
-const waitSync = async () => { for (let i = 0; i < 50; i++) { const s = await req("/api/sync"); if (!s.json?.running) return s.json; await sleep(200); } };
+const waitSync = async () => { for (let i = 0; i < 150; i++) { const s = await req("/api/sync"); if (!s.json?.running) return s.json; await sleep(200); } };
 const signedWebhook = (evt) => {
   const raw = JSON.stringify(evt);
   return req("/api/webhooks/crm", { method: "POST", headers: { "content-type": "application/json", "x-ghl-signature": crypto.sign(null, Buffer.from(raw), privateKey).toString("base64") }, body: raw });
@@ -67,7 +92,9 @@ try {
   const login = await req("/api/auth/connect");
   const authUrl = new URL(login.headers.get("location"));
   check("connect redirects to the CRM consent screen", authUrl.host === "marketplace.gohighlevel.com" && authUrl.pathname === "/oauth/chooselocation");
-  check("requests all 11 scopes", authUrl.searchParams.get("scope").split(" ").length === 11);
+  const scopes = authUrl.searchParams.get("scope").split(" ");
+  check("requests all 13 scopes incl. ad reporting + email events", scopes.length === 13 && scopes.includes("adPublishing.readonly") && scopes.includes("lc-email.readonly"), scopes.join(" "));
+  check("health reports storage mode", health.json?.storage === (REDIS ? "upstash-redis" : "files") && health.json?.serverless === SERVERLESS, JSON.stringify(health.json));
   const state = authUrl.searchParams.get("state");
   const stateCookie = login.headers.get("set-cookie").match(/gv_oauth_state=([^;]+)/)[1];
   cookie = `gv_oauth_state=${stateCookie}`;
@@ -89,7 +116,7 @@ try {
   const setup = await post("/api/auth/setup", { email: "Owner@Acme.test", password: "correct horse battery", confirm: "correct horse battery" });
   check("setup creates the login and sends you to sign in", setup.status === 200 && setup.json.next.startsWith("/login?notice=created&email=owner%40acme.test"), setup.text);
   check("setup ticket is consumed", /gv_setup=;/.test(setup.headers.get("set-cookie") ?? ""));
-  const users = JSON.parse(fs.readFileSync(path.join(dataDir, "users.json"), "utf8")).users;
+  const users = userRecords();
   check("password stored only as scrypt hash", users[0].passwordHash.startsWith("scrypt$") && !JSON.stringify(users).includes("correct horse"));
   cookie = "";
   check("dashboard requires sign-in", (await req("/dashboard")).headers.get("location")?.includes("/login"));
@@ -106,7 +133,9 @@ try {
   const dash = (await req("/api/dashboard?days=7")).json;
   const by = Object.fromEntries(dash.accounts.map((a) => [a.id, a]));
   check("company name pulled", dash.companyName === "Acme Marketing");
-  check("Alpha healthy, 70 leads in 7d, CPL $5", by.L1.status === "healthy" && by.L1.leads === 70 && by.L1.cpl === 5, JSON.stringify(by.L1).slice(0, 200));
+  check("Alpha healthy, 70 leads in 7d", by.L1.status === "healthy" && by.L1.leads === 70, JSON.stringify(by.L1).slice(0, 200));
+  check("Alpha spend comes from ad platforms (FB $30 + Google $15 a day)", by.L1.spend === 7 * 45 && by.L1.cpl === 4.5 && by.L1.spendSource === "ad platforms", `spend=${by.L1.spend} cpl=${by.L1.cpl} src=${by.L1.spendSource}`);
+  check("Beta spend falls back to the custom value", by.L2.spend === 7 * 50 && by.L2.spendSource === "custom value", `spend=${by.L2.spend} src=${by.L2.spendSource}`);
   check("Beta flagged churn (1 lead/day < 3)", by.L2.status === "churn");
   check("Gamma shows install error", by.L3.status === "error" && /installed/.test(by.L3.syncError));
   check("show rate = showed / (showed + no-show)", Math.abs(by.L1.showRate - 2 / 3) < 1e-9);
@@ -115,10 +144,13 @@ try {
   check("one location-token exchange per sub-account", tokenMints === 3, `got ${tokenMints}`);
 
   console.log("Token encryption at rest");
-  const file = fs.readFileSync(path.join(dataDir, "company-co1.json"), "utf8");
+  const file = JSON.stringify(dumpKV());
   check("no plaintext tokens on disk", !/agency-secret-token|refresh-secret-token|location-secret-/.test(file));
   check("tokens stored as enc:v1", file.includes("enc:v1:"));
-  check("store file is owner-only (0600)", (fs.statSync(path.join(dataDir, "company-co1.json")).mode & 0o777) === 0o600);
+  if (!REDIS) {
+    const f = fs.readdirSync(path.join(dataDir, "kv")).find((x) => x.endsWith(".json"));
+    check("store files are owner-only (0600)", (fs.statSync(path.join(dataDir, "kv", f)).mode & 0o777) === 0o600);
+  }
 
   console.log("Churn alerts");
   check("rejects non-https alert URL", (await req("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ alertWebhookUrl: "http://example.com/x" }) })).status === 400);
@@ -136,7 +168,7 @@ try {
   const imp = (await post("/api/adspend", { csv })).json;
   check("import counts rows / unmatched / invalid", imp.imported === 1 && imp.unmatched[0] === "Unknown Co" && imp.invalid === 1, JSON.stringify(imp));
   const alpha = (await req("/api/dashboard?days=7")).json.accounts.find((a) => a.id === "L1");
-  check("imported day overrides synced spend", alpha.spend === 6 * 50 + 1000, `spend=${alpha.spend}`);
+  check("imported day overrides ad-platform spend", alpha.spend === 6 * 45 + 1000 && alpha.spendSource === "CSV import", `spend=${alpha.spend} src=${alpha.spendSource}`);
   check("template CSV uses account_id and lists accounts", (await req("/api/adspend")).text.startsWith("account_id,name,date,spend") && (await req("/api/adspend")).text.includes("Beta Dental"));
 
   console.log("Snapshot push & retry");
@@ -156,7 +188,7 @@ try {
   console.log("Cron");
   check("cron rejects missing secret", (await req("/api/cron/sync")).status === 401);
   const cron = await req("/api/cron/sync", { headers: { authorization: `Bearer ${CRON_SECRET}` } });
-  check("cron syncs connected agencies", cron.json?.synced?.includes("co1"), cron.text);
+  check("cron syncs connected workspaces to completion", cron.json?.synced?.includes("co1") && cron.json?.finished?.includes("co1"), cron.text);
 
   console.log("Password change, reconnect & reset");
   const oldCookie = cookie;
@@ -176,11 +208,40 @@ try {
   cookie = `gv_setup=${reset.headers.get("set-cookie").match(/gv_setup=([^;]+)/)[1]}`;
   check("reset page says reset", (await req("/setup")).text.includes("Reset your password"));
   const r2 = await post("/api/auth/setup", { email: "owner@acme.test", password: "reset passphrase 2026" });
-  check("reset keeps the same login", r2.json?.next?.startsWith("/login?notice=reset") && JSON.parse(fs.readFileSync(path.join(dataDir, "users.json"), "utf8")).users.length === 1);
+  check("reset keeps the same login", r2.json?.next?.startsWith("/login?notice=reset") && userRecords().length === 1);
   cookie = newCookie;
   check("reset signs out existing sessions", (await req("/api/dashboard")).status === 401);
   const relog = await post("/api/auth/login", { email: "owner@acme.test", password: "reset passphrase 2026" });
   cookie = `gv_session=${relog.headers.get("set-cookie").match(/gv_session=([^;]+)/)[1]}`;
+
+  console.log("Email health (LCEmailStats webhooks)");
+  const ev = (event, extra = {}) => signedWebhook({ type: "LCEmailStats", companyId: "co1", locationId: "L1", webhookPayload: { event, id: crypto.randomUUID(), timestamp: Math.floor(Date.now() / 1000), ...extra } });
+  for (let i = 0; i < 30; i++) await ev("delivered", { message: { headers: { "message-id": `<m${i}@x>` } } });
+  for (let i = 0; i < 3; i++) await ev("opened", { message: { headers: { "message-id": `<m${i}@x>` } } });
+  const dupOpen = await ev("opened", { message: { headers: { "message-id": "<m0@x>" } } });
+  check("second open of the same email isn't counted", dupOpen.json?.counted === null, dupOpen.text);
+  await ev("failed", { severity: "permanent", "delivery-status": { code: 550 } });
+  await ev("failed", { "delivery-status": { code: 550 } });
+  const temp = await ev("failed", { severity: "temporary", "delivery-status": { code: 421 } });
+  check("temporary failures aren't bounces", temp.json?.counted === null);
+  await ev("complained");
+  await ev("unsubscribed");
+  const replay = JSON.stringify({ type: "LCEmailStats", companyId: "co1", locationId: "L1", webhookPayload: { event: "complained", id: "fixed-id" } });
+  const sig = crypto.sign(null, Buffer.from(replay), privateKey).toString("base64");
+  await req("/api/webhooks/crm", { method: "POST", headers: { "x-ghl-signature": sig }, body: replay });
+  const again = await req("/api/webhooks/crm", { method: "POST", headers: { "x-ghl-signature": sig }, body: replay });
+  check("redelivered email event is ignored", again.json?.duplicate === true);
+  const stale = JSON.stringify({ type: "LCEmailStats", companyId: "co1", locationId: "L1", timestamp: new Date(Date.now() - 3_600_000).toISOString(), webhookId: "old" });
+  check("stale (replayed) delivery rejected", (await req("/api/webhooks/crm", { method: "POST", headers: { "x-ghl-signature": crypto.sign(null, Buffer.from(stale), privateKey).toString("base64") }, body: stale })).status === 401);
+  const em = (await req("/api/dashboard?days=7")).json;
+  const a1 = em.accounts.find((a) => a.id === "L1").email;
+  check("email counts: 30 delivered, 3 opened, 27 not opened", a1.delivered === 30 && a1.opened === 3 && a1.notOpened === 27, JSON.stringify(a1));
+  check("email counts: 2 bounces, 2 spam complaints, 1 unsubscribe", a1.bounced === 2 && a1.complained === 2 && a1.unsubscribed === 1, JSON.stringify(a1));
+  check("spam rate over 0.3% → critical", a1.status === "critical" && a1.reasons.some((r) => r.includes("spam")), JSON.stringify(a1.reasons));
+  check("workspace email totals", em.email.delivered === 30 && em.email.critical === 1);
+  const beforeEmail = mock.alerts.length;
+  await post("/api/sync"); await waitSync(); await sleep(300);
+  check("critical email health triggers an alert", mock.alerts.length === beforeEmail + 1 && mock.alerts.at(-1).text.includes("email deliverability") && mock.alerts.at(-1).text.includes("Alpha Roofing"), JSON.stringify(mock.alerts.at(-1)));
 
   console.log("Webhooks");
   check("unsigned webhook rejected", (await req("/api/webhooks/ghl", { method: "POST", body: JSON.stringify({ type: "UNINSTALL", companyId: "co1" }) })).status === 401);
@@ -198,7 +259,7 @@ try {
   check("sign-in is rate-limited after repeated failures", (await post("/api/auth/login", { email: "owner@acme.test", password: "reset passphrase 2026" })).status === 429);
   cookie = `gv_session=${relog.headers.get("set-cookie").match(/gv_session=([^;]+)/)[1]}`;
   const un = await signedWebhook({ type: "UNINSTALL", companyId: "co1", webhookId: "w3" });
-  check("workspace uninstall deletes data and login", un.json?.action === "workspace data deleted" && !fs.existsSync(path.join(dataDir, "company-co1.json")) && JSON.parse(fs.readFileSync(path.join(dataDir, "users.json"), "utf8")).users.length === 0);
+  check("workspace uninstall deletes data and login", un.json?.action === "workspace data deleted" && !Object.keys(dumpKV()).some((k) => k.startsWith("gv:co:co1:") && !k.endsWith("lock")) && userRecords().length === 0, Object.keys(dumpKV()).filter((k) => k.startsWith("gv:co:co1:")).join(","));
   check("session no longer valid after uninstall", (await req("/api/dashboard")).status === 401);
 } catch (e) {
   failures++;
@@ -207,6 +268,7 @@ try {
 } finally {
   app.kill();
   mock.server.close();
+  redis?.server.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 }
 

@@ -54,7 +54,9 @@ Click **Explore with demo data** to try it right away, or **Connect HighLevel ag
 2. **Distribution type: Agency** (Sub-account + Agency). The app must be installed at the agency level. The callback rejects sub-account-only installs, because a location token can't see other clients.
 3. Add the **Redirect URL** `https://<your-host>/api/auth/callback` (use `http://localhost:3000/api/auth/callback` for local work).
 4. Add these **scopes**:
-   `locations.readonly locations.write locations/customValues.readonly oauth.readonly oauth.write companies.readonly contacts.readonly opportunities.readonly calendars.readonly calendars/events.readonly snapshots.readonly`
+   `locations.readonly locations.write locations/customValues.readonly oauth.readonly oauth.write companies.readonly contacts.readonly opportunities.readonly calendars.readonly calendars/events.readonly snapshots.readonly adPublishing.readonly lc-email.readonly`
+
+   If you tick more scopes in the app, list them in `CRM_EXTRA_SCOPES` so the authorize request matches.
 5. Copy the Client ID and Secret into `.env.local`. Set `GHL_APP_ID` (the part of the client ID before the `-`) so only sub-accounts with the app installed are synced.
 
 ### How the OAuth flow works
@@ -77,50 +79,73 @@ for each sub-account: POST /oauth/locationToken ─► location token (cached ~2
 | Leads | `POST /contacts/search`: contacts by `dateAdded`, bucketed in the sub-account's timezone |
 | Revenue | `GET /opportunities/search?status=won`: `monetaryValue`, dated by `lastStatusChangeAt` (looks back 120 extra days of creation date so long-cycle deals count) |
 | Show rate | `GET /calendars/events` across every calendar: `showed / (showed + noshow)` |
-| Ad spend / CPL | HighLevel has **no public ads-reporting API**, so spend comes from a sub-account **custom value** (default key `ad_spend_daily`). It can hold a daily number (`"42.50"`) or JSON per day (`{"2026-10-29": 41.2}`). Agencies usually fill it from Meta/Google Ads with Zapier, Make or n8n. You can also type a daily spend override per account in the drawer. |
+| Ad spend / CPL | Ad Manager reporting (`adPublishing.readonly`): `GET /ad-publishing/{facebook,google,linkedin}/reporting` per day, summed. Falls back to a **custom value** (default key `ad_spend_daily`, a daily number or JSON per day). CSV imports and manual overrides win over both. |
+| Email health | `LCEmailStats` webhook events (`lc-email.readonly`): delivered, opened (unique per message), clicked, permanent failures (bounces), complaints (spam) and unsubscribes, counted per account per day |
 | Snapshot push | `GET /snapshots` lists them, `PUT /locations/{id}` with `{ snapshot: { id, override } }` pushes one, `GET /snapshots/snapshot-status/{snapshotId}/location/{id}` reports progress |
 
 **Pushing a single funnel or workflow:** HighLevel distributes assets through snapshots. Create a snapshot from the winning sub-account that contains only that funnel or workflow (Agency → Account Snapshots), then push it. With **override off**, the push only adds assets. Turning override on replaces assets that have the same name, and the UI asks for an explicit confirmation first.
 
 ## Webhooks
 
-In the Marketplace app, set **Webhook URL** to `https://<host>/api/webhooks/ghl` and subscribe to:
+In the Marketplace app, set **Webhook URL** to `https://<host>/api/webhooks/crm` (the older `/api/webhooks/ghl` path also works) and subscribe to:
 
 | Event | What God View does |
 |---|---|
 | `INSTALL` (sub-account) | Syncs that sub-account right away |
 | `LocationCreate` | Syncs the new sub-account right away |
 | `UNINSTALL` (sub-account) | Removes that sub-account and its token |
-| `UNINSTALL` (agency) | Deletes all of that agency's tokens and data |
+| `UNINSTALL` (agency) | Deletes all of that agency's tokens, data and login |
+| `LCEmailStats` | Counts the email event for that sub-account's email health |
 
-Every delivery must carry a valid signature. Paste HighLevel's published public key into `GHL_WEBHOOK_ED25519_PUBLIC_KEY` (`x-ghl-signature`) and/or `GHL_WEBHOOK_PUBLIC_KEY` (`x-wh-signature`). In production, unsigned or forged requests get a 401. Deliveries are de-duplicated by `webhookId`.
+Every delivery must carry a valid signature. HighLevel's published RSA key (`x-wh-signature`) is built in; set `CRM_WEBHOOK_PUBLIC_KEY` only if they rotate it (or `CRM_WEBHOOK_ED25519_PUBLIC_KEY` for `x-ghl-signature`). Unsigned or forged requests get a 401, deliveries with a top-level `timestamp` older than 5 minutes are rejected, and repeats are de-duplicated.
+
+HighLevel documents `LCEmailStats` as available to location-level apps, so email events arrive for sub-accounts where the app is installed.
 
 ## Sync
 
 - **Sync** in the header pulls every sub-account (4 at a time; 429/5xx responses are retried with backoff) over the configured window (default 60 days, which covers a 30-day view plus its comparison period).
-- **Automatic:** the server syncs every agency every `AUTO_SYNC_HOURS` (default 6).
-- **External cron:** `GET /api/cron/sync` with `Authorization: Bearer $CRON_SECRET`. This works with Vercel Cron, GitHub Actions or cron-job.org; set `AUTO_SYNC_HOURS=0` if you use it.
+- **Resumable:** a sync is planned (list sub-accounts, queue them) and then worked through in time-limited steps, saving after every sub-account. A step holds a lock, so parallel callers never duplicate work.
+- **Docker/VM:** a built-in timer starts a sync every `AUTO_SYNC_HOURS` (default 6) and runs the steps back to back.
+- **Vercel:** functions stop after responding, so steps are driven by **Vercel Cron** (`vercel.json` → `/api/cron/sync`, which starts or continues due workspaces) and by the dashboard's progress poll while it's open. The included schedule is daily (Hobby plan limit); on Pro use `*/15 * * * *`.
+- **External cron:** `GET /api/cron/sync` with `Authorization: Bearer $CRON_SECRET` from any scheduler.
 - A fresh install triggers a sync, and webhooks keep sub-accounts current between syncs.
 - If one sub-account fails (for example, the app isn't installed there), only that row is flagged and the rest of the sync continues.
 
 ## Ad spend
 
 Spend is taken from the first available source, in this order:
-1. **CSV import** (Settings → Import ad spend). Columns: `location_id` or `name`, `date`, `spend`. Values like `$1,234.50` and dates as `MM/DD/YYYY` are accepted.
+1. **CSV import** (Settings → Import ad spend). Columns: `account_id` or `name`, `date`, `spend`. Values like `$1,234.50` and dates as `MM/DD/YYYY` are accepted.
 2. **Manual daily override** in an account's detail panel.
-3. **Synced custom value** (`ad_spend_daily`), as a daily number or JSON per day, typically filled by Zapier or Make.
+3. **Connected ad platforms**: Facebook/Instagram, Google and LinkedIn ad accounts connected in the sub-account's Ad Manager.
+4. **Synced custom value** (`ad_spend_daily`), as a daily number or JSON per day, typically filled by Zapier or Make.
 
 ## Churn alerts
 
 Settings → Churn alerts takes any `https://` incoming webhook: Slack, Google Chat, Discord (append `/slack`), Zapier or Make. After each sync, every sub-account that newly turned red is posted once. Accounts that were already red when you set up alerts are announced on the next sync.
 
+## Storage
+
+- **Upstash Redis** when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set; the `KV_REST_API_URL` / `KV_REST_API_TOKEN` names from Vercel's Upstash integration also work. It talks to the REST API, so no extra package is needed.
+- **Files** under `DATA_DIR` otherwise, for Docker or a VM.
+- **On serverless hosts without Redis, the app refuses to start storage** rather than silently losing data.
+- A workspace is stored as separate keys (meta, auth, tokens, sync, jobs, one key per sub-account, and an email-counter hash per sub-account). Concurrent writers never overwrite each other's data.
+- Older `data/company-*.json` and `data/users.json` files are imported automatically on first read.
+
 ## Deploy
+
+**Vercel**
+1. Import the repo.
+2. Go to **Storage → Upstash Redis** and connect a database.
+3. Add the env vars from `.env.example`, including `CRON_SECRET`.
+4. Deploy.
+
+**Docker**
 
 ```bash
 docker compose up -d --build     # uses .env.local, persists data in a volume
 ```
 
-Any long-running Node host works: Render, Fly.io, Railway or a VM. Health check: `GET /api/health`.
+Health check: `GET /api/health` reports the storage mode, whether the host is serverless, and whether cron is configured.
 
 ## Tests
 
@@ -128,7 +153,7 @@ Any long-running Node host works: Render, Fly.io, Railway or a VM. Health check:
 npm run build && npm test
 ```
 
-This runs 64 end-to-end checks against a mock CRM API (`scripts/mock-ghl.mjs`):
+This runs the end-to-end suite three times: with file storage, with Redis (a mock Upstash server, `scripts/mock-redis.mjs`), and with Redis in serverless mode. That's about 75 checks per mode, against a mock CRM API (`scripts/mock-ghl.mjs`):
 - OAuth state and code exchange, token-exchange count
 - Sync and metrics, including timezone bucketing
 - Encryption at rest
@@ -138,6 +163,8 @@ This runs 64 end-to-end checks against a mock CRM API (`scripts/mock-ghl.mjs`):
 - Cron auth
 - Webhook signatures, idempotency and uninstall cleanup
 - Login setup, sign-in, password rules, password change and reset, rate limiting
+- Ad-platform spend and spend-source priority
+- Email events: unique opens, permanent vs temporary bounces, spam rate status, replay and duplicate protection, email alerts
 
 ## Architecture
 
@@ -152,7 +179,9 @@ src/lib/alerts.ts         churn alert delivery
 src/lib/push.ts           snapshot push jobs, status polling
 src/lib/scheduler.ts      auto-sync loop + cron entry point
 src/lib/crypto.ts         AES-256-GCM token encryption
-src/lib/store.ts          JSON-file store per agency (data/company-<id>.json, mode 0600)
+src/lib/kv.ts             storage backends: Upstash Redis (REST) or files
+src/lib/store.ts          per-workspace keys (meta, auth, tokens, sync, jobs, sub-accounts)
+src/lib/email.ts          email event counting and health thresholds
 src/components/*          dashboard UI (Next.js App Router, Tailwind, Recharts)
 ```
 
