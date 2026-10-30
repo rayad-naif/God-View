@@ -12,6 +12,6 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const body = await req.json().catch(() => ({}));
   if ("dailySpendOverride" in body) acc.dailySpendOverride = optNum(body.dailySpendOverride);
   if ("churnThresholdOverride" in body) acc.churnThresholdOverride = optNum(body.churnThresholdOverride);
-  await saveStore(store);
+  await saveStore(store, ["accounts"], [acc.id]);
   return NextResponse.json({ ok: true });
 }

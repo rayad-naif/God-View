@@ -101,7 +101,7 @@ export default function SettingsView() {
               <dt className="text-ink-3">Workspace</dt><dd>{info.companyName ?? "—"}</dd>
               <dt className="text-ink-3">Status</dt><dd>{info.connected ? <span className="text-[var(--good-text)]">Connected · access encrypted at rest</span> : "Not connected"}</dd>
               <dt className="text-ink-3">Access renewal</dt><dd>{info.tokenExpiresAt ? "Automatic" : "—"}</dd>
-              <dt className="text-ink-3">Permissions</dt><dd className="text-ink-2">Read accounts, contacts, opportunities, calendars, appointments and snapshots. Write only to load snapshots you push.</dd>
+              <dt className="text-ink-3">Permissions</dt><dd className="text-ink-2">Read accounts, contacts, opportunities, calendars, appointments, snapshots, ad reporting and email delivery events. Write only to load snapshots you push.</dd>
             </dl>
           ) : null}
           <a href="/api/auth/connect" className="btn mt-4"><Link2 className="w-4 h-4" /> {info?.mode === "live" ? "Reconnect CRM" : "Connect CRM"}</a>
@@ -175,8 +175,8 @@ export default function SettingsView() {
         <section className="card p-5 space-y-3">
           <h2 className="font-semibold flex items-center gap-2"><Webhook className="w-4 h-4 text-brand" /> CRM webhooks</h2>
           <p className="text-sm text-ink-2">
-            In your CRM app settings, set the <b>Webhook URL</b> to the address below and subscribe to <code>INSTALL</code>, <code>UNINSTALL</code> and <code>LocationCreate</code>.
-            New accounts then sync automatically, and uninstalling God View from your CRM deletes your tokens, data and login from this server.
+            In your CRM app settings, set the <b>Webhook URL</b> to the address below and subscribe to <code>INSTALL</code>, <code>UNINSTALL</code>, <code>LocationCreate</code> and <code>LCEmailStats</code>.
+            New accounts then sync automatically, email health fills in as emails are sent, and uninstalling God View from your CRM deletes your tokens, data and login from this server.
           </p>
           <div className="flex gap-2">
             <input className="input flex-1 font-mono text-xs" readOnly value={webhookUrl} />

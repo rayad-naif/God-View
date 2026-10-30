@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     touched.add(acc.id);
     imported++;
   }
-  await saveStore(store);
+  await saveStore(store, ["accounts"]);
   return NextResponse.json({ rows: rows.length, imported, accounts: touched.size, invalid, unmatched: [...unmatched].slice(0, 50) });
 }
 
@@ -67,6 +67,6 @@ export async function DELETE() {
   const store = await getStoreForSession();
   if (!store) return unauthorized();
   for (const a of Object.values(store.accounts)) a.importedSpend = undefined;
-  await saveStore(store);
+  await saveStore(store, ["accounts"]);
   return NextResponse.json({ ok: true });
 }

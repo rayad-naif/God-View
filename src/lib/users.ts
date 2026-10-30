@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
+import { kv } from "./kv";
 
 export type User = {
   id: string;
@@ -13,30 +14,36 @@ export type User = {
   lastLoginAt?: string;
 };
 
-const FILE = path.join(process.env.DATA_DIR || path.join(process.cwd(), "data"), "users.json");
-const g = globalThis as unknown as { __gvUsers?: User[]; __gvUsersLock?: Promise<void> };
+const UK = {
+  user: (id: string) => `gv:user:${id}`,
+  byEmail: (email: string) => `gv:user-email:${email}`,
+  byCompany: (cid: string) => `gv:user-co:${cid}`,
+};
 
-async function all(): Promise<User[]> {
-  if (g.__gvUsers) return g.__gvUsers;
-  try {
-    g.__gvUsers = JSON.parse(await fs.readFile(FILE, "utf8")).users ?? [];
-  } catch {
-    g.__gvUsers = [];
-  }
-  return g.__gvUsers!;
+async function loadUser(id: string | null): Promise<User | undefined> {
+  if (!id) return undefined;
+  const raw = await kv().get(UK.user(id));
+  return raw ? (JSON.parse(raw) as User) : undefined;
+}
+async function saveUser(u: User) {
+  await kv().set(UK.user(u.id), JSON.stringify(u));
 }
 
-async function persist(users: User[]) {
-  g.__gvUsers = users;
-  const prev = g.__gvUsersLock ?? Promise.resolve();
-  const next = prev.then(async () => {
-    await fs.mkdir(path.dirname(FILE), { recursive: true });
-    const tmp = `${FILE}.${process.pid}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify({ users }), { mode: 0o600 });
-    await fs.rename(tmp, FILE);
-  });
-  g.__gvUsersLock = next.catch(() => {});
-  return next;
+/** One-time import of the pre-Redis data/users.json file. */
+let migrated = false;
+async function migrateLegacyUsers() {
+  if (migrated || kv().kind !== "file") return;
+  migrated = true;
+  const file = path.join(process.env.DATA_DIR || path.join(process.cwd(), "data"), "users.json");
+  try {
+    const users = (JSON.parse(await fs.readFile(file, "utf8")).users ?? []) as User[];
+    for (const u of users) {
+      await saveUser(u);
+      await kv().set(UK.byEmail(u.email), u.id);
+      await kv().set(UK.byCompany(u.companyId), u.id);
+    }
+    await fs.rename(file, `${file}.migrated`);
+  } catch { /* nothing to migrate */ }
 }
 
 export const normaliseEmail = (e: string) => e.trim().toLowerCase();
@@ -68,12 +75,20 @@ export async function verifyPassword(pw: string, stored: string | undefined): Pr
   return Boolean(stored) && got.length === expected.length && crypto.timingSafeEqual(got, expected);
 }
 
-export const getUser = async (id: string) => (await all()).find((u) => u.id === id);
-export const findUserByEmail = async (email: string) => (await all()).find((u) => u.email === normaliseEmail(email));
-export const findUserByCompany = async (companyId: string) => (await all()).find((u) => u.companyId === companyId);
+export async function getUser(id: string) {
+  await migrateLegacyUsers();
+  return loadUser(id);
+}
+export async function findUserByEmail(email: string) {
+  await migrateLegacyUsers();
+  return loadUser(await kv().get(UK.byEmail(normaliseEmail(email))));
+}
+export async function findUserByCompany(companyId: string) {
+  await migrateLegacyUsers();
+  return loadUser(await kv().get(UK.byCompany(companyId)));
+}
 
 export async function createUser(email: string, password: string, companyId: string): Promise<User> {
-  const users = await all();
   const user: User = {
     id: crypto.randomUUID(),
     email: normaliseEmail(email),
@@ -82,40 +97,47 @@ export async function createUser(email: string, password: string, companyId: str
     sessionVersion: 1,
     createdAt: new Date().toISOString(),
   };
-  await persist([...users, user]);
+  // Claim the email atomically so two signups can't take the same address.
+  if (!(await kv().setNX(UK.byEmail(user.email), user.id, 60 * 60 * 24 * 365 * 100))) throw new Error("That email is already in use.");
+  await saveUser(user);
+  await kv().set(UK.byCompany(companyId), user.id);
   return user;
 }
 
 export async function updateUser(id: string, patch: Partial<Pick<User, "email" | "lastLoginAt">> & { password?: string }): Promise<User | undefined> {
-  const users = await all();
-  const u = users.find((x) => x.id === id);
+  const u = await loadUser(id);
   if (!u) return undefined;
-  if (patch.email) u.email = normaliseEmail(patch.email);
+  if (patch.email && normaliseEmail(patch.email) !== u.email) {
+    const next = normaliseEmail(patch.email);
+    if (!(await kv().setNX(UK.byEmail(next), u.id, 60 * 60 * 24 * 365 * 100))) throw new Error("That email is already in use.");
+    await kv().del(UK.byEmail(u.email));
+    u.email = next;
+  }
   if (patch.lastLoginAt) u.lastLoginAt = patch.lastLoginAt;
   if (patch.password) {
     u.passwordHash = await hashPassword(patch.password);
     u.sessionVersion++;
   }
-  await persist(users);
+  await saveUser(u);
   return u;
 }
 
 export async function deleteUsersForCompany(companyId: string) {
-  await persist((await all()).filter((u) => u.companyId !== companyId));
+  const u = await findUserByCompany(companyId);
+  if (!u) return;
+  await kv().del(UK.user(u.id), UK.byEmail(u.email), UK.byCompany(companyId));
 }
 
-// ---- brute-force protection ----
-const attempts = new Map<string, number[]>();
-/** Returns true when the key has exceeded `max` failures in the window. */
-export function rateLimited(key: string, max = 8, windowMs = 15 * 60_000): boolean {
-  const now = Date.now();
-  const list = (attempts.get(key) ?? []).filter((t) => now - t < windowMs);
-  attempts.set(key, list);
-  return list.length >= max;
+// ---- brute-force protection (shared across serverless instances via the KV store) ----
+const WINDOW = 15 * 60;
+const rlKey = (key: string) => `gv:rl:${key}`;
+/** True when the key has `max` or more recorded failures in the last 15 minutes. */
+export async function rateLimited(key: string, max = 8): Promise<boolean> {
+  return Number(await kv().get(rlKey(key))) >= max;
 }
-export function recordFailure(key: string) {
-  attempts.set(key, [...(attempts.get(key) ?? []), Date.now()]);
+export async function recordFailure(key: string) {
+  await kv().incr(rlKey(key), WINDOW);
 }
-export function clearFailures(key: string) {
-  attempts.delete(key);
+export async function clearFailures(key: string) {
+  await kv().del(rlKey(key));
 }

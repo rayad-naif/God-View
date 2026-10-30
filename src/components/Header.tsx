@@ -41,7 +41,7 @@ export default function Header({ companyName, mode, sync, onSync, activeJobs = 0
   }, []);
   return (
     <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--plane)]/90 backdrop-blur">
-      <div className="max-w-[1500px] mx-auto px-4 h-14 flex items-center gap-3">
+      <div className="max-w-[1500px] mx-auto px-4 h-14 flex items-center gap-2 sm:gap-3">
         <Link href="/dashboard" className="flex items-center gap-2 font-semibold">
           <Eye className="w-5 h-5 text-brand" /> <span className="hidden sm:inline">God View</span>
         </Link>
@@ -67,8 +67,8 @@ export default function Header({ companyName, mode, sync, onSync, activeJobs = 0
         ) : (
           <Link href="/dashboard" className="btn !p-2" aria-label="Dashboard"><LayoutDashboard className="w-4 h-4" /></Link>
         )}
-        <Link href="/docs" className="btn !p-2" aria-label="Documentation" title="Documentation"><BookOpen className="w-4 h-4" /></Link>
-        <ThemeToggle />
+        <Link href="/docs" className="btn !p-2 !hidden sm:!inline-flex" aria-label="Documentation" title="Documentation"><BookOpen className="w-4 h-4" /></Link>
+        <span className="hidden sm:contents"><ThemeToggle /></span>
         {email && <span className="hidden xl:inline text-xs text-ink-3 max-w-[180px] truncate" title={email}>{email}</span>}
         <form action="/api/auth/logout" method="post">
           <button className="btn !p-2" aria-label={mode === "demo" ? "Exit demo" : "Sign out"} title={mode === "demo" ? "Exit demo" : "Sign out"}><LogOut className="w-4 h-4" /></button>

@@ -1,4 +1,4 @@
-import type { Account, CompanyStore, DailyMetric, PushJob, Snapshot } from "./types";
+import type { Account, CompanyStore, DailyMetric, EmailDay, PushJob, Snapshot } from "./types";
 import { emptyStore } from "./store";
 import { lastDays } from "./dates";
 
@@ -65,8 +65,28 @@ export function buildDemoStore(): CompanyStore {
       return { date, leads, booked, showed, noShow, revenue, spend };
     });
 
+    // Email: most accounts are healthy; a few have list-quality or spam-folder problems.
+    const er = rng(5000 + i);
+    const eRoll = er();
+    const profile = eRoll < 0.06 ? "spam" : eRoll < 0.13 ? "bounces" : eRoll < 0.2 ? "inbox-miss" : "healthy";
+    const email: Record<string, EmailDay> = {};
+    for (const d of daily) {
+      const sent = Math.round(d.leads * (2 + er() * 3) + er() * 15);
+      const bounceRate = profile === "bounces" ? 0.05 + er() * 0.06 : 0.004 + er() * 0.012;
+      const bounced = Math.round(sent * bounceRate);
+      const delivered = sent - bounced;
+      const openRate = profile === "inbox-miss" ? 0.05 + er() * 0.07 : profile === "spam" ? 0.12 + er() * 0.1 : 0.22 + er() * 0.25;
+      const opened = Math.round(delivered * openRate);
+      const complained = profile === "spam" ? Math.round(delivered * (0.003 + er() * 0.006)) : er() < 0.008 ? 1 : 0;
+      email[d.date] = {
+        sent, delivered, opened, bounced, complained,
+        clicked: Math.round(opened * (0.08 + er() * 0.12)),
+        unsubscribed: Math.round(delivered * (0.001 + er() * 0.004)),
+      };
+    }
+
     const id = `demo-loc-${String(i + 1).padStart(3, "0")}`;
-    store.accounts[id] = { id, name, city, state: st, timezone: "UTC", daily, lastSyncedAt: new Date().toISOString() } satisfies Account;
+    store.accounts[id] = { id, name, city, state: st, timezone: "UTC", daily, email, spendSource: "ads", lastSyncedAt: new Date().toISOString() } satisfies Account;
   }
   store.sync = { running: false, total: 100, done: 100, errors: 0, finishedAt: new Date().toISOString() };
   return store;

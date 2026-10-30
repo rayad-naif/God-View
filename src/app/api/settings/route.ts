@@ -37,6 +37,6 @@ export async function PUT(req: Request) {
   }
   if (typeof body.alertOnRecovery === "boolean") s.alertOnRecovery = body.alertOnRecovery;
   if (typeof body.adSpendCustomValueKey === "string") s.adSpendCustomValueKey = body.adSpendCustomValueKey.trim().slice(0, 100);
-  await saveStore(store);
+  await saveStore(store, ["meta"]);
   return NextResponse.json({ settings: s });
 }

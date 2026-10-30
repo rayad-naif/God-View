@@ -1,4 +1,5 @@
-import type { AccountMetrics, AccountStatus, CompanyStore, DailyMetric, DashboardPayload } from "./types";
+import type { AccountMetrics, AccountStatus, CompanyStore, DailyMetric, DashboardPayload, EmailDay, EmailSummary } from "./types";
+import { emailHealth } from "./email";
 import { lastDays } from "./dates";
 
 const ZERO = (date: string): DailyMetric => ({ date, leads: 0, booked: 0, showed: 0, noShow: 0, revenue: 0, spend: 0 });
@@ -11,7 +12,30 @@ function sum(rows: DailyMetric[]) {
 }
 const ratio = (a: number, b: number) => (b > 0 ? a / b : null);
 
-export function computeDashboard(store: CompanyStore, days: number): DashboardPayload {
+function summariseEmail(rows: EmailDay[]): EmailSummary {
+  const t = rows.reduce<Required<EmailDay>>(
+    (a, r) => ({
+      sent: a.sent + (r.sent ?? 0), delivered: a.delivered + (r.delivered ?? 0), opened: a.opened + (r.opened ?? 0), clicked: a.clicked + (r.clicked ?? 0),
+      bounced: a.bounced + (r.bounced ?? 0), complained: a.complained + (r.complained ?? 0), unsubscribed: a.unsubscribed + (r.unsubscribed ?? 0),
+    }),
+    { sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, complained: 0, unsubscribed: 0 },
+  );
+  const opened = Math.min(t.opened, t.delivered);
+  const { status, reasons } = emailHealth({ ...t, opened });
+  return {
+    ...t,
+    opened,
+    notOpened: Math.max(0, t.delivered - opened),
+    openRate: t.delivered ? opened / t.delivered : null,
+    bounceRate: t.delivered + t.bounced ? t.bounced / (t.delivered + t.bounced) : null,
+    spamRate: t.delivered ? t.complained / t.delivered : null,
+    status,
+    reasons,
+  };
+}
+
+/** `emailStats`: accountId -> date -> counts, from the KV store (demo accounts carry their own). */
+export function computeDashboard(store: CompanyStore, days: number, emailStats: Record<string, Record<string, EmailDay>> = {}): DashboardPayload {
   const { settings } = store;
   const range = lastDays(days);
   const prevRange = lastDays(days, days);
@@ -21,14 +45,23 @@ export function computeDashboard(store: CompanyStore, days: number): DashboardPa
   const daily = new Map(range.map((d) => [d, { date: d, leads: 0, revenue: 0, showed: 0, noShow: 0 }]));
   const accounts: AccountMetrics[] = Object.values(store.accounts).map((acc) => {
     const byDate = new Map(acc.daily.map((d) => [d.date, d]));
+    const sources = new Set<NonNullable<AccountMetrics["spendSource"]>>();
     const withSpend = (d: DailyMetric) => {
       const imported = acc.importedSpend?.[d.date];
-      if (imported != null) return { ...d, spend: imported };
-      return acc.dailySpendOverride != null ? { ...d, spend: acc.dailySpendOverride } : d;
+      if (imported != null) { sources.add("CSV import"); return { ...d, spend: imported }; }
+      if (acc.dailySpendOverride != null) { sources.add("manual"); return { ...d, spend: acc.dailySpendOverride }; }
+      if (d.spend) sources.add(acc.spendSource === "ads" ? "ad platforms" : "custom value");
+      return d;
     };
     const series = range.map((d) => withSpend(byDate.get(d) ?? ZERO(d)));
     const prev = prevRange.map((d) => withSpend(byDate.get(d) ?? ZERO(d)));
     const cur = sum(series);
+    const emailByDay = { ...acc.email, ...emailStats[acc.id] };
+    const emailSeries = range.map((d) => {
+      const e = emailByDay[d] ?? {};
+      return { date: d, delivered: e.delivered ?? 0, opened: Math.min(e.opened ?? 0, e.delivered ?? 0), bounced: e.bounced ?? 0, complained: e.complained ?? 0 };
+    });
+    const email = summariseEmail(range.map((d) => emailByDay[d] ?? {}));
     const p = sum(prev);
 
     for (const s of series) {
@@ -65,6 +98,9 @@ export function computeDashboard(store: CompanyStore, days: number): DashboardPa
       cplPrev: p.spend > 0 ? ratio(p.spend, p.leads) : null,
       showRatePrev: ratio(p.showed, p.showed + p.noShow),
       series,
+      spendSource: (["CSV import", "manual", "ad platforms", "custom value"] as const).find((x) => sources.has(x)),
+      email,
+      emailSeries,
       syncError: acc.syncError,
       lastSyncedAt: acc.lastSyncedAt,
       dailySpendOverride: acc.dailySpendOverride,
@@ -119,5 +155,11 @@ export function computeDashboard(store: CompanyStore, days: number): DashboardPa
       showRatePrev: ratio(prevAgg.showed, prevAgg.showed + prevAgg.noShow),
     },
     daily: [...daily.values()],
+    email: {
+      ...summariseEmail(accounts.map((a) => a.email)),
+      accountsWithData: accounts.filter((a) => a.email.delivered + a.email.bounced > 0).length,
+      critical: accounts.filter((a) => a.email.status === "critical").length,
+      warning: accounts.filter((a) => a.email.status === "warning").length,
+    },
   };
 }

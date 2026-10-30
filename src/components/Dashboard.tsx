@@ -7,6 +7,7 @@ import Header from "./Header";
 import { KpiTiles, AccountsTrend } from "./Overview";
 import Leaderboard from "./Leaderboard";
 import ChurnRadar from "./ChurnRadar";
+import EmailHealth from "./EmailHealth";
 import AccountDrawer from "./AccountDrawer";
 import PushModal from "./PushModal";
 import JobsPanel, { jobActive } from "./JobsPanel";
@@ -199,6 +200,8 @@ export default function Dashboard() {
                 </div>
               )}
             </section>
+
+            <EmailHealth data={data} onOpen={setDrawerId} />
 
             <section className="card overflow-hidden">
               <div className="px-4 pt-4 pb-3 flex items-center gap-3">

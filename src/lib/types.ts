@@ -8,6 +8,8 @@ export type DailyMetric = {
   spend: number;
 };
 
+export type EmailDay = { sent?: number; delivered?: number; opened?: number; clicked?: number; bounced?: number; complained?: number; unsubscribed?: number };
+
 export type Account = {
   id: string;
   name: string;
@@ -20,6 +22,10 @@ export type Account = {
   /** Per-account overrides set from the dashboard. */
   dailySpendOverride?: number;
   churnThresholdOverride?: number;
+  /** Where synced spend came from. */
+  spendSource?: "ads" | "custom value";
+  /** Email event counts by day (demo data; live data lives in the KV store, see email.ts). */
+  email?: Record<string, EmailDay>;
   /** Spend imported from CSV, keyed by YYYY-MM-DD. Takes precedence over synced spend. */
   importedSpend?: Record<string, number>;
 };
@@ -67,6 +73,8 @@ export type AuthTokens = {
   scope?: string;
 };
 
+export type SyncLocation = { id: string; name: string; city?: string; state?: string; timezone?: string };
+
 export type SyncState = {
   running: boolean;
   startedAt?: string;
@@ -75,6 +83,10 @@ export type SyncState = {
   done: number;
   errors: number;
   message?: string;
+  /** Accounts still to sync in this run (resumable across serverless invocations). */
+  queue?: SyncLocation[];
+  windowFrom?: string;
+  windowTo?: string;
 };
 
 export type CompanyStore = {
@@ -89,8 +101,8 @@ export type CompanyStore = {
   sync: SyncState;
   /** Accounts we've already sent a churn alert for (cleared on recovery). */
   alertedChurn?: string[];
-  /** Recent webhook ids, for idempotency. */
-  processedWebhooks?: string[];
+  /** Accounts already alerted for critical email health. */
+  alertedEmail?: string[];
   /** Set when the agency uninstalls the app. */
   uninstalledAt?: string;
 };
@@ -98,6 +110,22 @@ export type CompanyStore = {
 export type Snapshot = { id: string; name: string; type?: string };
 
 export type AccountStatus = "churn" | "watch" | "healthy" | "error";
+
+export type EmailSummary = {
+  sent: number;
+  delivered: number;
+  opened: number;
+  notOpened: number;
+  clicked: number;
+  bounced: number;
+  complained: number;
+  unsubscribed: number;
+  openRate: number | null;
+  bounceRate: number | null;
+  spamRate: number | null;
+  status: "good" | "warning" | "critical" | "none";
+  reasons: string[];
+};
 
 export type AccountMetrics = {
   id: string;
@@ -119,6 +147,10 @@ export type AccountMetrics = {
   cplPrev: number | null;
   showRatePrev: number | null;
   series: DailyMetric[]; // range days, oldest -> newest
+  /** Where this period's spend came from. */
+  spendSource?: "CSV import" | "manual" | "ad platforms" | "custom value";
+  email: EmailSummary;
+  emailSeries: { date: string; delivered: number; opened: number; bounced: number; complained: number }[];
   syncError?: string;
   lastSyncedAt?: string;
   dailySpendOverride?: number;
@@ -148,4 +180,5 @@ export type DashboardPayload = {
     showRatePrev: number | null;
   };
   daily: { date: string; leads: number; revenue: number; showed: number; noShow: number }[];
+  email: EmailSummary & { accountsWithData: number; critical: number; warning: number };
 };
